@@ -7,7 +7,7 @@ set -e
 export DOMAIN="${DOMAIN:-_}"
 
 render() {
-    if [ -n "$DOMAIN" ] && [ -f "/etc/letsencrypt/live/$DOMAIN/fullchain.pem" ]; then
+    if [ -n "$DOMAIN" ] && [ -f /etc/letsencrypt/live/agc/fullchain.pem ]; then
         tpl=https
     else
         tpl=http

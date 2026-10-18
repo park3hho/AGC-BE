@@ -1,35 +1,27 @@
 # 인증서가 있을 때 — 80 은 인증서 확인 + https 로 넘기기, 443 은 app 으로 전달
 # ${DOMAIN} 만 start.sh 의 envsubst 로 채운다 (nginx 변수 $host 등은 그대로)
+# DOMAIN 은 도메인 또는 IP. IP 로 접속하면 SNI 가 없으므로 default_server 로 받는다.
+# 인증서 이름은 항상 "agc" (certbot --cert-name agc) — 도메인·IP 가 바뀌어도 경로는 그대로.
 
-# 도메인 없이 IP 로 들어오는 스캔 요청은 응답 없이 끊는다
 server {
     listen 80 default_server;
-    return 444;
-}
-server {
-    listen 443 ssl default_server;
-    ssl_reject_handshake on;
-}
-
-server {
-    listen 80;
     server_name ${DOMAIN};
 
     location /.well-known/acme-challenge/ {
         root /var/www/certbot;
     }
     location / {
-        return 301 https://$host$request_uri;
+        return 301 https://${DOMAIN}$request_uri;
     }
 }
 
 server {
-    listen 443 ssl;
+    listen 443 ssl default_server;
     http2 on;
     server_name ${DOMAIN};
 
-    ssl_certificate     /etc/letsencrypt/live/${DOMAIN}/fullchain.pem;
-    ssl_certificate_key /etc/letsencrypt/live/${DOMAIN}/privkey.pem;
+    ssl_certificate     /etc/letsencrypt/live/agc/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/agc/privkey.pem;
     ssl_protocols TLSv1.2 TLSv1.3;
     ssl_session_cache shared:SSL:10m;
 

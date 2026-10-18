@@ -47,7 +47,9 @@ def setup_middlewares(app: FastAPI):
         "max_age": int(os.getenv("SESSION_MAX_AGE_SEC", str(86400 * 7))),
     }
     if is_production:
-        session_kwargs["same_site"] = "none"
+        # FE 가 Vercel rewrite(/api → BE)로 같은 출처에서 부르면 lax 로 충분 (CSRF 에 더 안전).
+        #   FE 가 다른 도메인에서 BE 를 직접 부르게 되면 SESSION_SAME_SITE=none.
+        session_kwargs["same_site"] = os.getenv("SESSION_SAME_SITE", "none").strip().lower() or "none"
         session_kwargs["https_only"] = True
     app.add_middleware(SessionMiddleware, **session_kwargs)
 

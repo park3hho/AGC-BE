@@ -325,7 +325,8 @@ app_user 1 ──< N company_account_password_view >── 1 company_account
 | `ENABLE_DOCS` | `1` 이면 `/docs` 공개 (dev 전용) |
 | `SESSION_MAX_AGE_SEC` | 세션 유효기간 override (선택) |
 | `ACCOUNT_SECRET_KEY` | 회사 계정 비밀번호 암호화 키 (Fernet). 만들기: `openssl rand -base64 32 \| tr '+/' '-_'`. **바꾸거나 잃으면 기존 비밀번호 복호화 불가** — 별도 백업 (§5) |
-| `BE_DOMAIN` | BE 공개 도메인 (예: `api.example.com`). nginx·certbot 이 사용. 비어 있으면 nginx 는 발급용 http 만 연다 |
+| `BE_DOMAIN` | BE 공개 주소 — 도메인 또는 공인 IP (현재 공인 IP, 도메인 없음). nginx 가 사용. 비어 있으면 nginx 는 발급용 http 만 연다 |
+| `SESSION_SAME_SITE` | production 쿠키 SameSite. `lax` 권장 (Vercel rewrite 로 같은 출처). FE 가 다른 도메인에서 BE 를 직접 부르면 `none` |
 | `TZ` | `Asia/Seoul` |
 
 **Docker Compose 구성**
@@ -362,17 +363,22 @@ docker compose logs -f app
 - 8000·5432 는 `127.0.0.1` 에만 연다. 외부에서 들어오는 길은 nginx 뿐 → uvicorn `--proxy-headers` 로 실제 접속 IP 를 써도 위조할 수 없다.
 
 **처음 켜기 (1회)**
-1. 도메인 A 레코드 → 이 PC 공인 IP. 공유기에서 80·443 → 이 PC 포트포워딩.
-2. `.env` 에 `BE_DOMAIN=도메인`, `ENV=production`, `ENABLE_DOCS=` (비움 — 외부에 API 문서 노출 금지).
+1. 공유기(ipTIME, `192.168.0.1`) NAT/라우터 관리 → 포트포워드: TCP 80·443 → 이 PC 내부 IP (`192.168.0.5`, DHCP 고정 할당 권장). 도메인을 쓰면 A 레코드 → 공인 IP.
+2. `.env` 에 `BE_DOMAIN=<공인IP 또는 도메인>`, `ENV=production`, `ENABLE_DOCS=` (비움 — 외부에 API 문서 노출 금지), `SESSION_SAME_SITE=lax`.
 3. `docker compose up -d` (nginx 가 http 설정으로 뜬다)
-4. 인증서 발급 (Let's Encrypt 약관 동의 포함):
+4. 인증서 발급 (Let's Encrypt 약관 동의 포함). `--cert-name agc` 는 꼭 유지 — nginx 가 `live/agc` 를 본다.
    ```bash
-   docker compose run --rm --entrypoint certbot certbot certonly --webroot -w /var/www/certbot -d <도메인> --agree-tos --register-unsafely-without-email --no-eff-email
+   # 공인 IP (현재 방식, 도메인 없음 — Let's Encrypt IP 인증서는 shortlived 6일짜리만 나온다)
+   docker compose run --rm --entrypoint certbot certbot certonly --webroot -w /var/www/certbot --cert-name agc --ip-address <공인IP> --preferred-profile shortlived --agree-tos --register-unsafely-without-email --no-eff-email
+   # 도메인이면 --ip-address ... --preferred-profile shortlived 대신 -d <도메인>
    ```
-5. `docker compose restart nginx` → https 설정으로 전환. `curl https://도메인/health` 확인.
-6. FE `vercel.json` 에 `/api/(.*)` → `https://도메인/$1` rewrite (SPA rewrite 보다 앞에).
+   먼저 `--dry-run` 으로 연습하면 실제 발급 한도를 쓰지 않는다.
+5. `docker compose restart nginx` → https 설정으로 전환. `curl https://<주소>/health` 확인.
+6. FE `vercel.json` 에 `/api/:path*` → `https://<주소>/:path*` rewrite (SPA rewrite 보다 앞에).
 
-**자동 갱신**: `certbot` 컨테이너가 12시간마다 `certbot renew` (만료 30일 전부터 갱신) → nginx 가 1시간 안에 reload. PC 가 꺼져 있던 기간이 길어도 켜지면 바로 확인한다.
+**자동 갱신**: `certbot` 컨테이너가 12시간마다 `certbot renew` → nginx 가 1시간 안에 reload. 갱신 시점은 certbot 이 ARI(Let's Encrypt 가 알려주는 시점) 또는 수명 절반(6일 인증서면 약 3일)으로 정한다.
+- **PC 가 3일 넘게 꺼져 있으면 인증서가 만료**될 수 있다 → 켜지면 바로 다시 받는다 (그 사이 HTTPS 오류).
+- **공인 IP 가 바뀌면** (가정용 회선은 가끔 바뀐다): `.env` 의 `BE_DOMAIN` · FE `vercel.json` 을 새 IP 로 바꾸고 4번으로 다시 발급. 자주 바뀌면 무료 도메인(DuckDNS 등)으로 옮긴다.
 **백업**: `letsencrypt` 볼륨 (없어져도 4번으로 다시 발급 가능 — 단 Let's Encrypt 주간 발급 한도 주의).
 
 **.gitignore**: `__pycache__/`, `*.pyc`, `.env`, `secrets/`, `*.key`, `*.pem`, `runtime/`, `.idea/`
