@@ -1,0 +1,2 @@
+# 컨테이너(Linux)에서 실행되는 파일이라 줄바꿈은 LF 로 고정
+* text=auto eol=lf

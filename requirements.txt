@@ -1,0 +1,8 @@
+# 2026-10-18 python:3.14-slim 에서 설치 확인한 버전으로 고정
+fastapi==0.144.0
+uvicorn[standard]==0.54.0
+tortoise-orm==1.1.9
+asyncpg==0.32.0
+aerich==0.10.1
+bcrypt==5.0.0
+itsdangerous==2.2.0

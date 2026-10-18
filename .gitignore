@@ -1,0 +1,12 @@
+.idea/
+__pycache__/
+*.pyc
+.env
+
+# 비밀키·인증서 — 절대 커밋 금지
+secrets/
+*.key
+*.pem
+
+# 런타임 상태
+runtime/
