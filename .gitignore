@@ -10,3 +10,6 @@ secrets/
 
 # 런타임 상태
 runtime/
+
+# 업로드된 사진 — 이 PC 디스크에 보관 (백업 대상, 커밋 금지)
+uploads/
