@@ -6,7 +6,7 @@ services:
     image: agc-be:latest
     container_name: agc_app
     ports:
-      - "8000:8000"
+      - "127.0.0.1:8000:8000"   # 이 PC 에서만. 외부 접속은 nginx(443) 로만
     volumes:
       - ./main:/app            # dev — 코드 수정이 --reload 로 바로 반영
       - ./uploads:/uploads     # 업로드 사진 — 이 PC 디스크 (BE/uploads). /app 밖이라 코드 폴더와 안 섞인다
@@ -14,7 +14,8 @@ services:
       - .env
     environment:
       - TZ=Asia/Seoul
-    command: uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+    # --proxy-headers: nginx 가 넘긴 X-Forwarded-For 로 실제 접속 IP 를 본다 (8000 은 이 PC 에서만 열려 있어 위조 불가)
+    command: uvicorn main:app --host 0.0.0.0 --port 8000 --reload --proxy-headers --forwarded-allow-ips=*
     depends_on:
       db:
         condition: service_healthy
@@ -30,7 +31,7 @@ services:
       TZ: Asia/Seoul
       PGTZ: Asia/Seoul
     ports:
-      - "5432:5432"
+      - "127.0.0.1:5432:5432"   # 이 PC 에서만
     volumes:
       - postgres_data:/var/lib/postgresql/data
     restart: always
@@ -40,5 +41,36 @@ services:
       timeout: 3s
       retries: 10
 
+  # HTTPS — nginx 가 443 을 받아 app:8000 으로 넘긴다. 인증서는 certbot (Let's Encrypt), 도메인은 .env 의 BE_DOMAIN
+  nginx:
+    image: nginx:1.30.1-alpine
+    container_name: agc_nginx
+    ports:
+      - "80:80"                 # 인증서 발급 확인 + https 로 넘기기
+      - "443:443"
+    environment:
+      - DOMAIN=${BE_DOMAIN:-}
+      - TZ=Asia/Seoul
+    volumes:
+      - ./nginx:/etc/nginx/agc:ro
+      - letsencrypt:/etc/letsencrypt:ro
+      - certbot_www:/var/www/certbot:ro
+    command: ["/bin/sh", "/etc/nginx/agc/start.sh"]
+    depends_on:
+      - app
+    restart: always
+
+  # 인증서 자동 갱신 — 12시간마다 확인, 만료 30일 전이면 갱신. nginx 는 1시간 안에 새 인증서로 reload
+  certbot:
+    image: certbot/certbot:v5.5.0
+    container_name: agc_certbot
+    volumes:
+      - letsencrypt:/etc/letsencrypt
+      - certbot_www:/var/www/certbot
+    entrypoint: ["/bin/sh", "-c", "trap exit TERM; while :; do certbot renew --webroot -w /var/www/certbot --quiet; sleep 12h & wait $${!}; done"]
+    restart: always
+
 volumes:
   postgres_data:
+  letsencrypt:      # 인증서·계정키 (백업 대상)
+  certbot_www:      # 발급 확인용 임시 파일

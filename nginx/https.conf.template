@@ -1,0 +1,47 @@
+# 인증서가 있을 때 — 80 은 인증서 확인 + https 로 넘기기, 443 은 app 으로 전달
+# ${DOMAIN} 만 start.sh 의 envsubst 로 채운다 (nginx 변수 $host 등은 그대로)
+
+# 도메인 없이 IP 로 들어오는 스캔 요청은 응답 없이 끊는다
+server {
+    listen 80 default_server;
+    return 444;
+}
+server {
+    listen 443 ssl default_server;
+    ssl_reject_handshake on;
+}
+
+server {
+    listen 80;
+    server_name ${DOMAIN};
+
+    location /.well-known/acme-challenge/ {
+        root /var/www/certbot;
+    }
+    location / {
+        return 301 https://$host$request_uri;
+    }
+}
+
+server {
+    listen 443 ssl;
+    http2 on;
+    server_name ${DOMAIN};
+
+    ssl_certificate     /etc/letsencrypt/live/${DOMAIN}/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/${DOMAIN}/privkey.pem;
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_session_cache shared:SSL:10m;
+
+    add_header Strict-Transport-Security "max-age=31536000" always;
+
+    client_max_body_size 11m;       # 사진 업로드 10MB + 여유
+
+    location / {
+        proxy_pass http://app:8000;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+}

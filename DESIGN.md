@@ -325,13 +325,16 @@ app_user 1 ──< N company_account_password_view >── 1 company_account
 | `ENABLE_DOCS` | `1` 이면 `/docs` 공개 (dev 전용) |
 | `SESSION_MAX_AGE_SEC` | 세션 유효기간 override (선택) |
 | `ACCOUNT_SECRET_KEY` | 회사 계정 비밀번호 암호화 키 (Fernet). 만들기: `openssl rand -base64 32 \| tr '+/' '-_'`. **바꾸거나 잃으면 기존 비밀번호 복호화 불가** — 별도 백업 (§5) |
+| `BE_DOMAIN` | BE 공개 도메인 (예: `api.example.com`). nginx·certbot 이 사용. 비어 있으면 nginx 는 발급용 http 만 연다 |
 | `TZ` | `Asia/Seoul` |
 
 **Docker Compose 구성**
 | 서비스 | 이미지 | 포트 | 볼륨 |
 |---|---|---|---|
-| app | `Dockerfile` 빌드 | 8000 | `./main:/app` (dev 코드 마운트) |
-| db | `postgres:16-alpine` | 5432 | `postgres_data` |
+| app | `Dockerfile` 빌드 | 127.0.0.1:8000 (이 PC 에서만) | `./main:/app` (dev 코드 마운트) |
+| db | `postgres:16-alpine` | 127.0.0.1:5432 (이 PC 에서만) | `postgres_data` |
+| nginx | `nginx:1.30.1-alpine` | 80 · 443 (외부) | `./nginx` (설정), `letsencrypt`, `certbot_www` |
+| certbot | `certbot/certbot:v5.5.0` | — | `letsencrypt`, `certbot_www` — 12시간마다 `certbot renew` |
 | redis (선택) | `redis:7-alpine` | 6379 | `redis_data` |
 
 ```bash
@@ -346,7 +349,31 @@ docker compose logs -f app
 - Docker Desktop 은 "Windows 로그인 시 자동 시작"을 켜고, `db`·`redis` 는 `restart: always`, `app` 은 `restart: unless-stopped` 로 둔다 → PC 재부팅 후 자동 복구.
 - PC 가 꺼져 있거나 절전 상태면 서버도 멈춘다 → 전원·절전 설정에서 절전 끄기.
 - DB 데이터는 Docker 볼륨(`postgres_data`)에 있다 → 정기 `pg_dump` 백업을 PC 밖(클라우드 드라이브 등)에 둔다.
-- FE 를 Vercel(HTTPS)에 두면 BE 도 HTTPS 주소가 필요하다 → 필요해지면 certbot 으로 발급 (§8).
+- FE 를 Vercel(HTTPS)에 두면 BE 도 HTTPS 주소가 필요하다 → certbot 으로 발급 (§7.1).
+
+### 7.1 HTTPS (nginx + certbot)
+
+```
+브라우저 → agc-fe.vercel.app/api/* ─(Vercel rewrite)→ https://BE_DOMAIN/* → nginx:443 → app:8000
+```
+- FE 는 `/api` 를 같은 출처로 부르고 Vercel 이 BE 로 넘긴다 → 브라우저 입장에선 쿠키가 vercel.app 것이라 CORS·제3자 쿠키 차단 문제가 없다.
+- nginx(`nginx/start.sh`)는 인증서가 있으면 `https.conf.template`, 없으면 발급 확인만 받는 `http.conf.template` 를 쓴다. 1시간마다 다시 골라 reload → 첫 발급·갱신이 재시작 없이 반영된다.
+- 인증서 없이는 API 를 열지 않는다 (80 은 `/.well-known/acme-challenge/` 외 503) — 비밀번호가 평문으로 오가지 않게.
+- 8000·5432 는 `127.0.0.1` 에만 연다. 외부에서 들어오는 길은 nginx 뿐 → uvicorn `--proxy-headers` 로 실제 접속 IP 를 써도 위조할 수 없다.
+
+**처음 켜기 (1회)**
+1. 도메인 A 레코드 → 이 PC 공인 IP. 공유기에서 80·443 → 이 PC 포트포워딩.
+2. `.env` 에 `BE_DOMAIN=도메인`, `ENV=production`, `ENABLE_DOCS=` (비움 — 외부에 API 문서 노출 금지).
+3. `docker compose up -d` (nginx 가 http 설정으로 뜬다)
+4. 인증서 발급 (Let's Encrypt 약관 동의 포함):
+   ```bash
+   docker compose run --rm --entrypoint certbot certbot certonly --webroot -w /var/www/certbot -d <도메인> --agree-tos --register-unsafely-without-email --no-eff-email
+   ```
+5. `docker compose restart nginx` → https 설정으로 전환. `curl https://도메인/health` 확인.
+6. FE `vercel.json` 에 `/api/(.*)` → `https://도메인/$1` rewrite (SPA rewrite 보다 앞에).
+
+**자동 갱신**: `certbot` 컨테이너가 12시간마다 `certbot renew` (만료 30일 전부터 갱신) → nginx 가 1시간 안에 reload. PC 가 꺼져 있던 기간이 길어도 켜지면 바로 확인한다.
+**백업**: `letsencrypt` 볼륨 (없어져도 4번으로 다시 발급 가능 — 단 Let's Encrypt 주간 발급 한도 주의).
 
 **.gitignore**: `__pycache__/`, `*.pyc`, `.env`, `secrets/`, `*.key`, `*.pem`, `runtime/`, `.idea/`
 
@@ -361,5 +388,5 @@ docker compose logs -f app
 - [x] HTTPS (필요해지면) → 이 PC 에서 certbot(Let's Encrypt) 인증서 발급. certbot 은 Windows 지원이 끝났으므로 Docker 컨테이너(`certbot/certbot`)로 돌리고, nginx 컨테이너가 443 을 받아 `app:8000` 으로 넘긴다
   - 전제: 도메인 → 이 PC 공인 IP (유동 IP 면 DDNS), 공유기에서 80·443 포트포워딩, Windows 방화벽 허용
   - 80 포트를 못 열면 DNS 챌린지(`--preferred-challenges dns`)로 발급
-  - 인증서는 90일 만료 → 갱신(`certbot renew`) 자동화 필요
+  - 인증서는 90일 만료 → `certbot` 컨테이너가 자동 갱신 (§7.1)
 - [x] 파일 저장소 → 이 PC 디스크 `BE/uploads/` (compose 가 `/uploads` 로 연결, `POST /uploads/photos` · `GET /files/...`). 정기 백업 대상에 포함

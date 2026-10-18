@@ -1,0 +1,14 @@
+# 인증서가 아직 없을 때 — 인증서 발급 확인(acme-challenge)만 받는다.
+# 비밀번호가 평문으로 오가지 않도록 API 는 https 가 생길 때까지 열지 않는다.
+
+server {
+    listen 80 default_server;
+    server_name ${DOMAIN};
+
+    location /.well-known/acme-challenge/ {
+        root /var/www/certbot;
+    }
+    location / {
+        return 503;
+    }
+}
