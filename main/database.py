@@ -7,7 +7,13 @@ TORTOISE_ORM = {
     "apps": {
         "models": {
             "models": [
-                # 새 모델 모듈은 여기에 추가해야 인식된다 (예: "models.user.user")
+                # 새 모델 모듈은 여기에 추가해야 인식된다
+                # product — 제품 + 가격 조사
+                "models.product.product",
+                "models.product.price_survey",
+                # user — 로그인 계정 · company_account — 회사 외부 서비스 계정 + 비밀번호 열람 기록
+                "models.user.user",
+                "models.company_account.company_account",
                 "aerich.models",
             ],
             "default_connection": "default",

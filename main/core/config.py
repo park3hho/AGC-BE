@@ -7,7 +7,8 @@ from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from starlette.middleware.sessions import SessionMiddleware
+
+from core.session import SessionMiddleware
 
 logger = logging.getLogger(__name__)
 
@@ -38,8 +39,9 @@ def setup_middlewares(app: FastAPI):
         expose_headers=["Content-Disposition"],   # 내려받기 파일 이름을 FE 가 읽도록
     )
 
-    # 세션 — 기본 7일, 요청마다 재서명되어 슬라이딩 갱신. SESSION_MAX_AGE_SEC 로 override.
-    # TODO: 계정 모델이 생기면 비활성 계정 세션을 비우는 가드 미들웨어를 이보다 먼저 등록한다 (DESIGN.md §5)
+    # 세션 — 기본 7일. 로그인이 필요한 요청마다 다시 써서 슬라이딩 갱신 (core/auth_deps.py). SESSION_MAX_AGE_SEC 로 override.
+    #   로그인 유지를 안 고르면 Max-Age 없는 브라우저 세션 쿠키 (core/session.py).
+    #   비활성 계정·비밀번호 변경 세션 차단은 미들웨어가 아니라 require_auth 가 매 요청 DB 확인으로 한다.
     session_kwargs = {
         "secret_key": os.getenv("SESSION_SECRET_KEY"),
         "max_age": int(os.getenv("SESSION_MAX_AGE_SEC", str(86400 * 7))),
@@ -54,3 +56,7 @@ def setup_middlewares(app: FastAPI):
 # 프로젝트 경로 상수
 # ────────────────────────────────────────────
 BASE_DIR = Path(__file__).resolve().parent.parent
+
+# 업로드 파일 — 이 PC 디스크. compose 가 ./uploads 를 /uploads 로 연결한다 (컨테이너를 지워도 남는다)
+UPLOAD_DIR = Path(os.getenv("UPLOAD_DIR", str(BASE_DIR / "uploads")))
+UPLOAD_URL_PREFIX = "/files"      # 저장된 파일은 이 주소 아래로 내려준다 (main.py StaticFiles)

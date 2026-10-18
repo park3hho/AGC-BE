@@ -19,7 +19,8 @@
 | 마이그레이션 | Aerich | 0.10.1 | 0.9.2 | 파일이 유일한 스키마 변경 경로 |
 | 캐시 | Redis | 미도입 | 7 | MES_BE 는 컨테이너만 있고 클라이언트 미사용 — 필요할 때 도입 |
 | 세션 | Starlette `SessionMiddleware` | (FastAPI 동반) | — | `itsdangerous` 서명 쿠키 |
-| 비밀번호 | bcrypt | 5.0.0 | — | |
+| 비밀번호 | bcrypt | 5.0.0 | — | 로그인 비밀번호 해시 (72바이트 한계 — 스키마에서 막음) |
+| 비밀값 암호화 | cryptography (`Fernet`) | 50.0.2 | — | 회사 계정 비밀번호는 다시 꺼내 봐야 해서 해시가 아닌 **복호화 가능한 암호화**가 필요. 직접 AES 를 조립하지 않고 검증된 Fernet(AES-CBC + HMAC) 사용. 키는 `ACCOUNT_SECRET_KEY` |
 | 린터 | ruff | — | — | line 120, `E F I W` |
 | 컨테이너 | Docker + Docker Compose | Docker 29.8 | — | |
 
@@ -42,6 +43,8 @@ BE/
 │   │   ├── config.py         #   미들웨어 (CORS, Session) + 경로 상수
 │   │   ├── auth_deps.py      #   require_auth / require_feature / require_role
 │   │   ├── permissions.py    #   Role · Feature enum + ROLE_FEATURES (FE permissions.js 와 동기)
+│   │   ├── session.py        #   SessionMiddleware (로그인 유지 안 하면 브라우저 세션 쿠키)
+│   │   ├── account_crypto.py #   회사 계정 비밀번호 Fernet 암호화/복호화
 │   │   ├── response_utils.py #   success() / success_only()
 │   │   └── {domain}_config.py#   도메인 상수 (상태값 등) — 진실의 원천
 │   ├── models/               # Tortoise 모델 — 도메인별 하위 폴더
@@ -194,18 +197,32 @@ async def lifespan(app: FastAPI):
 
 ## 5. 인증 · 권한
 
-- **세션 쿠키 인증**: 로그인 시 세션에 사용자 id·role 저장. 기본 유효기간 7일, 요청마다 갱신(슬라이딩).
+- **세션 쿠키 인증**: 로그인 시 세션에 `user_id` · `ver`(= `User.session_version`) · `remember` 만 저장. role 은 세션에 두지 않는다.
+  - 서명 유효기간 7일. `require_auth` 를 지나는 요청마다 세션을 다시 써서 갱신(슬라이딩) — Starlette 는 세션이 바뀔 때만 쿠키를 다시 보내므로 시각 값을 갱신한다.
+  - `remember=True` → 쿠키 `Max-Age` 7일. `False` → `Max-Age` 를 뺀 브라우저 세션 쿠키 (`core/session.py`).
 - **운영 환경** (`ENV != dev`): `same_site="none"`, `https_only=True`, CORS 에서 `http://`·`localhost` origin 자동 제거.
-- **비활성 계정 즉시 차단**: 세션 미들웨어 안쪽 가드에서 계정 `active` 확인 → 비활성이면 세션 비움.
+- **비활성 계정 즉시 차단**: 미들웨어 가드 대신 `require_auth` 가 요청마다 DB 에서 사용자를 읽어 `active` · `session_version` 확인 → 비활성이거나 비밀번호가 바뀌었으면 세션 비우고 401.
+  (어차피 role 을 DB 에서 읽어야 하므로 한 번의 조회로 같이 처리. 인증이 필요 없는 경로에는 DB 조회가 생기지 않는다.)
+- **로그인**: 틀린 아이디·비밀번호는 400 (FE `client.js` 가 401 을 받으면 로그인 화면으로 보내므로), 비활성 계정은 비밀번호가 맞을 때만 403. 없는 아이디도 bcrypt 를 한 번 돌려 응답 시간 차이를 없앤다.
+- **최초 관리자**: `docker compose exec app python -m scripts.create_admin` — 비밀번호는 실행 중 입력(화면에 안 보임).
 - **의존성 3종** (`core/auth_deps.py`)
 
 | 의존성 | 통과 조건 |
 |---|---|
 | `require_auth` | 로그인만 |
-| `require_feature(Feature.X)` | 해당 Feature 보유 (role 기본값 + 개인 override) |
+| `require_feature(Feature.X)` | 해당 Feature 보유 (role 기본값 — 개인 override 는 아직 없음) |
 | `require_role(Role.X)` | 해당 역할 |
 
+| Role | Feature |
+|---|---|
+| `admin` | `research` · `account_view` · `account_edit` · `user_manage` |
+| `member` | `research` · `account_view` |
+
 - role 은 **DB 우선** 조회 → 관리자가 권한을 내리면 다음 요청부터 즉시 반영.
+- 사용자 관리 규칙: 자기 자신 비활성화·자기 역할 변경 금지, 마지막 활성 관리자는 비활성화·강등 금지. 비밀번호를 바꾸면 `session_version` +1 → 그 사용자의 기존 세션 모두 401.
+- **회사 계정 비밀번호**: Fernet 암호문(`password_enc`)으로만 저장. 목록·등록 응답에 넣지 않고 `GET /company-accounts/{id}/password` 로 한 건씩만 복호화 → 그때마다 `company_account_password_view` 에 기록 (기록 실패 시 비밀번호도 안 줌).
+  - 회사 계정 라우터 로그에는 `str(e)` 대신 예외 종류만 남긴다 (DB 오류 메시지에 행 값이 섞일 수 있음). 스키마 `__repr__` 도 비밀번호를 뺀다.
+  - ⚠️ `ACCOUNT_SECRET_KEY` 를 잃으면 저장된 비밀번호를 복구할 수 없다 → `.env` 와 별도로 PC 밖 안전한 곳에 백업. `pg_dump` 백업과 **같은 곳에 두지 않는다** (둘 다 새면 평문과 같다).
 - 데이터를 바꾸는 엔드포인트는 `require_auth` 로 두지 않는다 — 로그인만으로 누구나 호출 가능해진다.
 - Feature 이름은 FE `constants/permissions.js` 와 문자열로 동기화한다.
 
@@ -222,6 +239,77 @@ aerich upgrade                          # 실제 적용
 - 생성된 마이그레이션 파일은 수정하지 않는다 — 틀렸으면 모델을 고치고 다시 생성.
 - `--fake` 사용 금지.
 
+### 6.1 데이터 모델 (2026-10-18)
+
+```
+product (제품) 1 ──< N price_survey (가격 조사) 1 ──< N price_survey_option (옵션별 가격)
+```
+
+**`product` — 제품 입력** (`models/product/product.py`)
+| 컬럼 | 타입 | 필수 | 뜻 |
+|---|---|---|---|
+| `code` | varchar(50), unique | ✅ | 제품 코드 — BE 발급 `PR-YYMMDD-XXXX` (추가일 KST, 순번 16진수 4자리) |
+| `photo_url` | varchar(1000) | | 제품 사진 — `/files/...` (업로드, 이 PC 디스크) 또는 외부 `http(s)` 주소 |
+| `title_cn` | varchar(300) | ✅ | 중국어 제목 |
+| `title_ko` | varchar(300) | | 한국어 제목 |
+| `created_at` | timestamptz | ✅ | 제품 코드 추가일 (자동) |
+
+**`price_survey` — 가격 입력** (`models/product/price_survey.py`)
+| 컬럼 | 타입 | 필수 | 뜻 |
+|---|---|---|---|
+| `product_id` | FK → product (삭제 시 같이 삭제) | ✅ | 제품 코드 FK |
+| `code` | varchar(50), unique | ✅ | 조사 코드번호 — BE 발급 `RS-YYMMDD-XXXX` (조사일 기준) |
+| `survey_date` | date | ✅ | 조사일 |
+| `photo_url` | varchar(1000) | | 제품 사진 link (보통 연결된 제품 사진) |
+| `taobao_url` | varchar(1000) | ✅ | 구매할 타오바오 링크 (공식몰 위주) |
+| `coupang_min_price` / `coupang_url` | int(원) / varchar | | 쿠팡 최저가 · 링크 (없어도 됨) |
+| `naver_min_price` / `naver_url` | int(원) / varchar | | 네이버 최저가 · 링크 (없어도 됨) |
+
+**`price_survey_option` — 옵션별 가격**
+| 컬럼 | 타입 | 필수 | 뜻 |
+|---|---|---|---|
+| `survey_id` | FK → price_survey (삭제 시 같이 삭제) | ✅ | 어느 조사의 옵션인지 |
+| `option1` | varchar(200) | ✅ | 옵션1 (예: 검정) |
+| `option2` | varchar(200) | | 옵션2 (예: L) |
+| `price_cny` | numeric(12,2) | ✅ | 옵션별 가격 (위안) |
+
+- **옵션 총 종류**는 컬럼으로 두지 않고 `price_survey_option` 행 수로 센다 — 따로 저장하면 실제 옵션 수와 어긋난다.
+- 한 제품을 여러 날 다시 조사할 수 있도록 제품 : 조사 = 1 : N.
+
+### 6.2 계정 · 회사 계정 (2026-10-18)
+
+```
+app_user 1 ──< N company_account (created_by, 사용자 삭제 시 NULL)
+app_user 1 ──< N company_account_password_view >── 1 company_account
+```
+
+**`app_user` — 로그인 계정** (`models/user/user.py`, 테이블명은 Postgres 예약어 `user` 를 피함)
+| 컬럼 | 타입 | 필수 | 뜻 |
+|---|---|---|---|
+| `username` | varchar(50), unique | ✅ | 로그인 아이디 (소문자로 저장) |
+| `name` | varchar(50) | ✅ | 표시 이름 |
+| `password_hash` | varchar(100) | ✅ | bcrypt 해시 — 응답·로그 금지 |
+| `role` | varchar(20) | ✅ | `admin` / `member` |
+| `active` | bool | ✅ | false = 사용 중지 (다음 요청부터 401) |
+| `session_version` | int | ✅ | 비밀번호 변경 시 +1 → 기존 세션 무효 |
+
+**`company_account` — 회사 외부 서비스 계정** (`models/company_account/company_account.py`)
+| 컬럼 | 타입 | 필수 | 뜻 |
+|---|---|---|---|
+| `platform` | varchar(100) | ✅ | 플랫폼 (타오바오·쿠팡·네이버 스마트스토어 등) |
+| `login_id` | varchar(200) | ✅ | 그 플랫폼의 아이디 |
+| `password_enc` | text | ✅ | Fernet 암호문 — 목록·로그 금지 |
+| `usages` | jsonb | ✅ | 용도 문자열 배열 (`?usage=` 는 jsonb `@>` 로 정확히 일치) |
+| `created_by_id` | FK → app_user (SET NULL) | | 추가한 사람 |
+
+**`company_account_password_view` — 비밀번호 열람 기록** (지우지 않는다)
+| 컬럼 | 타입 | 필수 | 뜻 |
+|---|---|---|---|
+| `account_id` | FK → company_account (CASCADE) | ✅ | 어느 계정 |
+| `user_id` | FK → app_user (RESTRICT) | ✅ | 누가 — 열람 기록이 있는 사용자는 지울 수 없다 (비활성화만) |
+| `ip` | varchar(64) | | 요청 IP |
+| `created_at` | timestamptz | ✅ | 언제 |
+
 ---
 
 ## 7. 환경 · 실행
@@ -236,6 +324,7 @@ aerich upgrade                          # 실제 적용
 | `ENV` | `dev` / `production` |
 | `ENABLE_DOCS` | `1` 이면 `/docs` 공개 (dev 전용) |
 | `SESSION_MAX_AGE_SEC` | 세션 유효기간 override (선택) |
+| `ACCOUNT_SECRET_KEY` | 회사 계정 비밀번호 암호화 키 (Fernet). 만들기: `openssl rand -base64 32 \| tr '+/' '-_'`. **바꾸거나 잃으면 기존 비밀번호 복호화 불가** — 별도 백업 (§5) |
 | `TZ` | `Asia/Seoul` |
 
 **Docker Compose 구성**
@@ -266,11 +355,11 @@ docker compose logs -f app
 ## 8. 미정 · 결정 필요
 
 - [ ] AGC 서비스 도메인 → `models/`·`services/` 하위 도메인 폴더 목록
-- [ ] 계정 모델 (MES_BE 는 `Machine` 테이블이 사람·기기 계정을 겸함 → AGC 는 처음부터 `User` 로)
+- [x] 계정 모델 → 사람 계정 `User`(`app_user`) + 역할 2개(admin/member), Feature 는 FE permissions.js 와 동일 (§5, §6.2)
 - [ ] Redis 사용 여부 (캐시·세션 저장소·작업 큐)
 - [x] 배포 대상 → 이 PC (Docker Desktop + Compose)
 - [x] HTTPS (필요해지면) → 이 PC 에서 certbot(Let's Encrypt) 인증서 발급. certbot 은 Windows 지원이 끝났으므로 Docker 컨테이너(`certbot/certbot`)로 돌리고, nginx 컨테이너가 443 을 받아 `app:8000` 으로 넘긴다
   - 전제: 도메인 → 이 PC 공인 IP (유동 IP 면 DDNS), 공유기에서 80·443 포트포워딩, Windows 방화벽 허용
   - 80 포트를 못 열면 DNS 챌린지(`--preferred-challenges dns`)로 발급
   - 인증서는 90일 만료 → 갱신(`certbot renew`) 자동화 필요
-- [ ] 파일 저장소 (S3 등) 필요 여부
+- [x] 파일 저장소 → 이 PC 디스크 `BE/uploads/` (compose 가 `/uploads` 로 연결, `POST /uploads/photos` · `GET /files/...`). 정기 백업 대상에 포함
