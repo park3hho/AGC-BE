@@ -5,16 +5,56 @@ from tortoise.exceptions import IntegrityError
 from tortoise.expressions import Q
 from tortoise.functions import Count
 
+from models.product.price_survey import PriceSurveyOption
+from models.product.pricing import ProductPricing
 from models.product.product import Product
 from schemas.product import ProductCreate, ProductUpdate
-from services.product.price_survey_service import PriceSurveyService
-from services.product.serializers import product_dict
+from services.product.price_survey_service import PriceSurveyService, alive_surveys
+from services.product.serializers import money_cny, product_dict
 from utils.code_gen import CODE_ISSUE_RETRIES, PRODUCT_CODE_PREFIX, next_code, today_kst
 
 
 def alive_products():
     """삭제되지 않은 제품만. 코드 발급(next_code)은 삭제된 것까지 봐야 코드가 다시 쓰이지 않으므로 이걸 쓰지 않는다."""
     return Product.filter(deleted_at=None)
+
+
+async def _list_extras(product_ids: list[int]) -> dict[int, dict]:
+    """목록 행에 붙이는 값 — 최근 가격 조사의 옵션 수·최저가, 가격을 저장한 판매처.
+    페이지에 나온 제품만 재므로 쿼리 3번으로 끝낸다 (제품마다 따로 읽지 않는다)."""
+    extras = {pid: {"latest_survey": None, "priced_platforms": []} for pid in product_ids}
+    if not product_ids:
+        return extras
+
+    # 제품별 최근 조사 (조사일 최근 → id 큰 순 첫 번째)
+    surveys = await (
+        alive_surveys().filter(product_id__in=product_ids)
+        .order_by("-survey_date", "-id").values("id", "product_id", "code", "survey_date")
+    )
+    latest = {}
+    for s in surveys:
+        latest.setdefault(s["product_id"], s)
+
+    prices: dict[int, list] = {}
+    for o in await PriceSurveyOption.filter(survey_id__in=[s["id"] for s in latest.values()]).values(
+        "survey_id", "price_cny"
+    ):
+        prices.setdefault(o["survey_id"], []).append(o["price_cny"])
+
+    for pid, s in latest.items():
+        ps = prices.get(s["id"], [])
+        extras[pid]["latest_survey"] = {
+            "id": s["id"],
+            "code": s["code"],
+            "survey_date": s["survey_date"].isoformat(),
+            "option_count": len(ps),
+            "min_price_cny": money_cny(min(ps)) if ps else None,
+        }
+
+    for r in await ProductPricing.filter(product_id__in=product_ids).values("product_id", "platform"):
+        platform = r["platform"]
+        extras[r["product_id"]]["priced_platforms"].append(getattr(platform, "value", platform))
+    return extras
 
 
 async def _get_alive(product_id: int) -> Product:
@@ -53,7 +93,8 @@ class ProductService:
             .offset((page - 1) * size)
             .limit(size)
         )
-        items = [{**product_dict(p), "survey_count": p.survey_count} for p in rows]
+        extras = await _list_extras([p.id for p in rows])
+        items = [{**product_dict(p), "survey_count": p.survey_count, **extras[p.id]} for p in rows]
         return {"items": items, "total": total, "page": page, "size": size}
 
     @staticmethod
