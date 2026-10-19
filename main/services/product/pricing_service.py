@@ -48,8 +48,18 @@ async def _base_survey(product_id: int) -> Optional[PriceSurvey]:
     return await alive_surveys().filter(product_id=product_id).order_by("-survey_date", "-id").first()
 
 
+def _option_price_dict(option_id: int, op: Optional[OptionPrice]) -> dict:
+    """옵션 1개의 판매가 + (네이버) 상품 나누기 직접 지정값. 저장 안 됐거나 옛 조사 기준이면 빈 값."""
+    return {
+        "option_id": option_id,
+        "sale_price": op.sale_price if op else None,
+        "listing_group": op.listing_group if op else None,
+        "is_base": op.is_base if op else False,
+    }
+
+
 def _pricing_dict(platform: Platform, pr: Optional[ProductPricing], base_survey_id: Optional[int],
-                  option_ids: list[int], prices: dict[int, int], current_fx: str) -> dict:
+                  option_ids: list[int], prices: dict[int, OptionPrice], current_fx: str) -> dict:
     """option_prices 는 기준 조사 options 순서·개수와 같다.
     저장된 survey_id 가 기준 조사와 다르면 판매가는 옛 옵션 기준이라 전부 null.
     fx_rate 는 저장 시점 환율(기록용). 저장 전이면 현재 환율 — 계산은 항상 응답의 fx(현재 환율)로 한다."""
@@ -60,7 +70,7 @@ def _pricing_dict(platform: Platform, pr: Optional[ProductPricing], base_survey_
             "fx_rate": current_fx, "fx_date": None, "fx_markup_pct": _dec(DEFAULT_FX_MARKUP_PCT, 2),
             "shipping_fee": DEFAULT_SHIPPING_FEE, "platform_fee_rate": _dec(fees["platform_fee_rate"], 2),
             "payment_fee_rate": _dec(fees["payment_fee_rate"], 2),
-            "option_prices": [{"option_id": oid, "sale_price": None} for oid in option_ids],
+            "option_prices": [_option_price_dict(oid, None) for oid in option_ids],
             "base_option_id": None,
             "updated_at": None,
         }
@@ -72,7 +82,7 @@ def _pricing_dict(platform: Platform, pr: Optional[ProductPricing], base_survey_
         "shipping_fee": pr.shipping_fee,
         "platform_fee_rate": _dec(pr.platform_fee_rate, 2), "payment_fee_rate": _dec(pr.payment_fee_rate, 2),
         "option_prices": [
-            {"option_id": oid, "sale_price": prices.get(oid) if same_survey else None} for oid in option_ids
+            _option_price_dict(oid, prices.get(oid) if same_survey else None) for oid in option_ids
         ],
         # 대표 옵션 — 옛 조사 기준이면 판매가처럼 null
         "base_option_id": pr.base_option_id if same_survey else None,
@@ -84,10 +94,10 @@ async def _pricings(product_id: int, base_survey_id: Optional[int], option_ids: 
                     platforms: list[Platform], current_fx: str) -> dict[str, dict]:
     rows = await ProductPricing.filter(product_id=product_id, platform__in=platforms)
     by_platform = {Platform(r.platform): r for r in rows}
-    prices_by_pricing: dict[int, dict[int, int]] = {r.id: {} for r in rows}
+    prices_by_pricing: dict[int, dict[int, OptionPrice]] = {r.id: {} for r in rows}
     if rows:
         for op in await OptionPrice.filter(pricing_id__in=list(prices_by_pricing)):
-            prices_by_pricing[op.pricing_id][op.option_id] = op.sale_price
+            prices_by_pricing[op.pricing_id][op.option_id] = op
     result = {}
     for pf in platforms:
         pr = by_platform.get(pf)
@@ -159,7 +169,8 @@ class PricingService:
                 await OptionPrice.filter(pricing_id=pr.id).using_db(conn).delete()
                 if body.option_prices:
                     await OptionPrice.bulk_create(
-                        [OptionPrice(pricing_id=pr.id, option_id=op.option_id, sale_price=op.sale_price)
+                        [OptionPrice(pricing_id=pr.id, option_id=op.option_id, sale_price=op.sale_price,
+                                     listing_group=op.listing_group, is_base=op.is_base)
                          for op in body.option_prices],
                         using_db=conn,
                     )

@@ -11,6 +11,9 @@ INT32_MAX = 2_147_483_647   # DB IntField(int4) 한계 — 넘으면 DB 오류(5
 class OptionPriceIn(BaseModel):
     option_id: int
     sale_price: int = Field(ge=1, le=INT32_MAX)                              # 판매가 (원)
+    # 네이버 상품 나누기 직접 지정 (대표가+추가금 판매처만 의미 있음) — 안 보내면 자동
+    listing_group: Optional[int] = Field(default=None, ge=1, le=50)          # 넣을 상품 번호
+    is_base: bool = False                                                    # 그 상품의 대표 옵션
 
 
 class ExchangeRateSave(BaseModel):

@@ -39,6 +39,11 @@ class OptionPrice(BaseModel):
     option = fields.ForeignKeyField("models.PriceSurveyOption", related_name="prices", on_delete=fields.CASCADE)
     sale_price = fields.IntField()
 
+    # 네이버처럼 "대표가 + 추가금" 판매처에서 추가금 한도를 넘는 옵션을 상품 여러 개로 나눠 등록할 때의 직접 지정값.
+    # 자동 묶음(용량·입수별 → 가격)은 FE utils/pricing.naverListingPlan 이 계산하고, 여기엔 사람이 바꾼 것만 남는다.
+    listing_group = fields.SmallIntField(null=True)   # 이 옵션을 넣을 상품 번호 (1부터) · null = 자동
+    is_base = fields.BooleanField(default=False)      # 그 상품의 대표 옵션(추가금 0원)으로 직접 지정
+
     class Meta:
         table = "option_price"
         unique_together = (("pricing", "option"),)
