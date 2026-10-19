@@ -61,6 +61,7 @@ def _pricing_dict(platform: Platform, pr: Optional[ProductPricing], base_survey_
             "shipping_fee": DEFAULT_SHIPPING_FEE, "platform_fee_rate": _dec(fees["platform_fee_rate"], 2),
             "payment_fee_rate": _dec(fees["payment_fee_rate"], 2),
             "option_prices": [{"option_id": oid, "sale_price": None} for oid in option_ids],
+            "base_option_id": None,
             "updated_at": None,
         }
     same_survey = pr.survey_id == base_survey_id
@@ -73,6 +74,8 @@ def _pricing_dict(platform: Platform, pr: Optional[ProductPricing], base_survey_
         "option_prices": [
             {"option_id": oid, "sale_price": prices.get(oid) if same_survey else None} for oid in option_ids
         ],
+        # 대표 옵션 — 옛 조사 기준이면 판매가처럼 null
+        "base_option_id": pr.base_option_id if same_survey else None,
         "updated_at": pr.updated_at.isoformat(),
     }
 
@@ -129,6 +132,8 @@ class PricingService:
         wrong = [op.option_id for op in body.option_prices if op.option_id not in survey_option_ids]
         if wrong:
             raise HTTPException(status_code=400, detail=f"이 가격 조사의 옵션이 아닙니다: option_id {wrong[0]}")
+        if body.base_option_id is not None and body.base_option_id not in seen:
+            raise HTTPException(status_code=400, detail="대표 옵션은 판매가가 있는 이 조사의 옵션이어야 합니다.")
 
         fields = {
             "survey_id": survey.id,
@@ -137,6 +142,7 @@ class PricingService:
             "fx_markup_pct": body.fx_markup_pct,
             "platform_fee_rate": body.platform_fee_rate,
             "payment_fee_rate": body.payment_fee_rate,
+            "base_option_id": body.base_option_id,
         }
         if body.shipping_fee is not None:      # 더 이상 계산에 안 씀 — 보내면 기록만
             fields["shipping_fee"] = body.shipping_fee

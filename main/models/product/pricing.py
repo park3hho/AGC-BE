@@ -21,6 +21,12 @@ class ProductPricing(BaseModel):
     platform_fee_rate = fields.DecimalField(max_digits=5, decimal_places=2)     # 플랫폼 수수료 %
     payment_fee_rate = fields.DecimalField(max_digits=5, decimal_places=2, default=0)  # 결제 수수료 %
 
+    # 대표 옵션 — 네이버처럼 "대표가 + 옵션 추가금"으로 등록하는 판매처에서 추가금 0원인 옵션.
+    # 비어 있으면 자동 (FE 가 추가금 한도를 만족하는 옵션을 고른다). 옵션이 지워지면 비운다
+    base_option = fields.ForeignKeyField(
+        "models.PriceSurveyOption", related_name="base_of_pricings", null=True, on_delete=fields.SET_NULL
+    )
+
     class Meta:
         table = "product_pricing"
         unique_together = (("product", "platform"),)

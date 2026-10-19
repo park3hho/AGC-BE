@@ -338,6 +338,7 @@ exchange_rate (날짜별 위안 환율, 독립 — 최근 행 = 현재 환율)
 | `fx_markup_pct` | numeric(5,2) | ✅ | 실결제 가산율 %. 기본 `DEFAULT_FX_MARKUP_PCT` (실결제 내역으로 확정 전 0) |
 | `shipping_fee` | int(원) | ✅ | **쓰지 않음** (2026-10-20 부터 옵션별 무게로 계산). 컨럼만 남아 있고 기본값 10000 으로 채워진다 |
 | `platform_fee_rate` / `payment_fee_rate` | numeric(5,2) | ✅ | 플랫폼 · 결제 수수료 % |
+| `base_option_id` | FK → price_survey_option (SET NULL) | | 대표 옵션 — 네이버 추가금 0원인 옵션. 비면 자동 (FE 가 한도를 만족하는 가장 싼 옵션). 마이그레이션 6 (2026-10-20) |
 
 **`option_price` — 옵션별 판매가** (unique `pricing + option`)
 | 컬럼 | 타입 | 필수 | 뜻 |
@@ -361,7 +362,8 @@ exchange_rate (날짜별 위안 환율, 독립 — 최근 행 = 현재 환율)
 - **차익 · 마진율은 저장하지 않는다** — 계산값이라 따로 두면 어긋난다. 판매가만 저장하고, 화면을 열 때마다 현재 환율로 다시 계산한다.
   `실결제환율 = 현재 환율 × (1 + fx_markup_pct/100)`, `원가+배송 = (price_cny + shipping_cny) × 실결제환율`,
   `차익 = sale_price − 원가+배송 − sale_price × (platform_fee_rate + payment_fee_rate)/100`, `마진율 = 차익 / sale_price`.
-- 네이버 대표가 · 옵션 추가금은 저장하지 않고 등록할 때 `option_price` 에서 계산한다 (대표가 = 최저 옵션가).
+- 네이버 추가금은 저장하지 않고 등록할 때 계산한다: 대표가 = `base_option` 의 판매가 (없으면 자동 선택), 추가금 = 옵션 판매가 − 대표가 (마이너스 가능).
+  한도: 대표가 1만 원 이상 −50%~+50%, 2천~1만 원 −50%~+100%, 2천 원 미만 0~+100% (2026-10-20 확인).
 
 ---
 
