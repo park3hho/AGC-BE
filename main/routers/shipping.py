@@ -11,6 +11,17 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/shipping-fees", tags=["Shipping"])
 
 
+@router.get("/rule")
+async def get_shipping_rule(auth=Depends(require_feature(Feature.RESEARCH))):
+    try:
+        return success(**await ShippingService.rule())
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"배송비 요금표 조회 실패: {e}")
+        raise HTTPException(status_code=500, detail="처리 중 오류가 발생했습니다.")
+
+
 @router.get("")
 async def list_shipping_fees(
     page: int = Query(default=1, ge=1),

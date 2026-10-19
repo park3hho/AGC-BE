@@ -73,6 +73,22 @@ def shipping_rule() -> dict:
     }
 
 
+def shipping_brackets() -> list[dict]:
+    """무게 구간별 요금표 — 첫 무게부터 소형 한도까지 0.5kg 단위.
+    max_volume_ml = 이 구간에 들어가는 최대 용량 (무게 − 박스, 1ml = 1g)."""
+    rows = []
+    kg = SHIPPING_FIRST_KG
+    while kg <= SHIPPING_MAX_KG:
+        max_weight_g = int(kg * 1000)
+        rows.append({
+            "billable_kg": _kg(kg),
+            "max_volume_ml": max(0, (max_weight_g - BOX_WEIGHT_G) // G_PER_ML),
+            "shipping_cny": money_cny(shipping_cny_for(kg)),
+        })
+        kg += SHIPPING_STEP_KG
+    return rows
+
+
 def option_dict(o: PriceSurveyOption) -> dict:
     """가격 책정 · 배송비 화면 공통 옵션 모양 (옵션 + 배송비)."""
     return {
@@ -83,6 +99,15 @@ def option_dict(o: PriceSurveyOption) -> dict:
 
 
 class ShippingService:
+    @staticmethod
+    async def rule() -> dict:
+        """요금 규칙 + 무게 구간별 요금표 + 현재 환율 (배송비 화면)."""
+        return {
+            "fx": await ExchangeRateService.current(),
+            "rule": shipping_rule(),
+            "brackets": shipping_brackets(),
+        }
+
     @staticmethod
     async def list(page: int, size: int) -> dict:
         """제품별 기준 조사(최신) 옵션의 배송비."""
