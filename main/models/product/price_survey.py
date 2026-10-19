@@ -18,6 +18,7 @@ class PriceSurvey(BaseModel):
     coupang_url = fields.CharField(max_length=1000, null=True)
     naver_min_price = fields.IntField(null=True)
     naver_url = fields.CharField(max_length=1000, null=True)
+    deleted_at = fields.DatetimeField(null=True)                  # 소프트 삭제 시각 — 값이 있으면 목록·상세에서 숨김
 
     class Meta:
         table = "price_survey"
@@ -30,6 +31,7 @@ class PriceSurveyOption(BaseModel):
     option1 = fields.CharField(max_length=200)                     # 옵션1
     option2 = fields.CharField(max_length=200, null=True)          # 옵션2 (없는 상품도 있음)
     price_cny = fields.DecimalField(max_digits=12, decimal_places=2)  # 옵션별 가격 (위안)
+    photo_url = fields.CharField(max_length=1000, null=True)      # 옵션별 사진 (예: 맛별 사진)
 
     class Meta:
         table = "price_survey_option"

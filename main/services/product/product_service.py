@@ -1,13 +1,27 @@
+from datetime import datetime, timezone
+
 from fastapi import HTTPException
 from tortoise.exceptions import IntegrityError
 from tortoise.expressions import Q
 from tortoise.functions import Count
 
 from models.product.product import Product
-from schemas.product import ProductCreate
+from schemas.product import ProductCreate, ProductUpdate
 from services.product.price_survey_service import PriceSurveyService
 from services.product.serializers import product_dict
 from utils.code_gen import CODE_ISSUE_RETRIES, PRODUCT_CODE_PREFIX, next_code, today_kst
+
+
+def alive_products():
+    """삭제되지 않은 제품만. 코드 발급(next_code)은 삭제된 것까지 봐야 코드가 다시 쓰이지 않으므로 이걸 쓰지 않는다."""
+    return Product.filter(deleted_at=None)
+
+
+async def _get_alive(product_id: int) -> Product:
+    p = await alive_products().get_or_none(id=product_id)
+    if not p:
+        raise HTTPException(status_code=404, detail="제품을 찾을 수 없습니다.")
+    return p
 
 
 class ProductService:
@@ -29,12 +43,12 @@ class ProductService:
 
     @staticmethod
     async def list(q: str | None, page: int, size: int) -> dict:
-        qs = Product.all()
+        qs = alive_products()
         if q:
             qs = qs.filter(Q(code__icontains=q) | Q(title_cn__icontains=q) | Q(title_ko__icontains=q))
         total = await qs.count()
         rows = (
-            await qs.annotate(survey_count=Count("price_surveys"))
+            await qs.annotate(survey_count=Count("price_surveys", _filter=Q(price_surveys__deleted_at=None)))
             .order_by("-created_at", "-id")
             .offset((page - 1) * size)
             .limit(size)
@@ -44,8 +58,21 @@ class ProductService:
 
     @staticmethod
     async def get(product_id: int) -> dict:
-        p = await Product.get_or_none(id=product_id)
-        if not p:
-            raise HTTPException(status_code=404, detail="제품을 찾을 수 없습니다.")
+        p = await _get_alive(product_id)
         surveys = await PriceSurveyService.summaries(product_id=p.id)
         return {"product": product_dict(p), "price_surveys": surveys}
+
+    @staticmethod
+    async def update(product_id: int, body: ProductUpdate) -> dict:
+        data = body.model_dump(exclude_unset=True)
+        if not data:
+            raise HTTPException(status_code=400, detail="바꿀 내용이 없습니다.")
+        p = await _get_alive(product_id)
+        await p.update_from_dict(data).save()
+        return product_dict(p)
+
+    @staticmethod
+    async def delete(product_id: int) -> None:
+        p = await _get_alive(product_id)
+        p.deleted_at = datetime.now(timezone.utc)
+        await p.save(update_fields=["deleted_at", "updated_at"])

@@ -11,6 +11,7 @@ TORTOISE_ORM = {
                 # product — 제품 + 가격 조사
                 "models.product.product",
                 "models.product.price_survey",
+                "models.product.pricing",       # 판매처별 가격 설정 · 옵션 판매가 · 환율 캐시
                 # user — 로그인 계정 · company_account — 회사 외부 서비스 계정 + 비밀번호 열람 기록
                 "models.user.user",
                 "models.company_account.company_account",

@@ -205,6 +205,11 @@ async def lifespan(app: FastAPI):
   (어차피 role 을 DB 에서 읽어야 하므로 한 번의 조회로 같이 처리. 인증이 필요 없는 경로에는 DB 조회가 생기지 않는다.)
 - **로그인**: 틀린 아이디·비밀번호는 400 (FE `client.js` 가 401 을 받으면 로그인 화면으로 보내므로), 비활성 계정은 비밀번호가 맞을 때만 403. 없는 아이디도 bcrypt 를 한 번 돌려 응답 시간 차이를 없앤다.
 - **최초 관리자**: `docker compose exec app python -m scripts.create_admin` — 비밀번호는 실행 중 입력(화면에 안 보임).
+- **API 키** (자동화용 — 리서처 skill): 헤더 `X-API-Key`. `api_key` 테이블에 sha256 해시만 저장, 원문은 발급 때 한 번만 출력.
+  - 발급·목록·폐기는 BE PC 에서 스크립트로만: `docker compose exec app python -m scripts.api_key create|list|revoke`. API 로는 발급하지 않는다.
+  - 키는 사용자 1명에 묶인다 (`researcher` 직원 계정, 비밀번호는 아무도 모르는 임의값 → 화면 로그인 불가). 사용자를 비활성화하면 키도 401.
+  - **키로는 `require_auth` · `require_feature(RESEARCH)` 만 통과** (`API_KEY_FEATURES`). 그 밖 Feature · `require_role` 은 역할과 상관없이 403 → 키가 새도 회사 계정 비밀번호·사용자 관리에는 닿지 않는다.
+  - 키 헤더를 보냈으면 키로만 판단한다 (틀린 키면 세션이 있어도 401). `last_used_at` 은 5분에 한 번만 갱신.
 - **의존성 3종** (`core/auth_deps.py`)
 
 | 의존성 | 통과 조건 |
@@ -253,6 +258,7 @@ product (제품) 1 ──< N price_survey (가격 조사) 1 ──< N price_surv
 | `title_cn` | varchar(300) | ✅ | 중국어 제목 |
 | `title_ko` | varchar(300) | | 한국어 제목 |
 | `created_at` | timestamptz | ✅ | 제품 코드 추가일 (자동) |
+| `deleted_at` | timestamptz | | 소프트 삭제 시각 |
 
 **`price_survey` — 가격 입력** (`models/product/price_survey.py`)
 | 컬럼 | 타입 | 필수 | 뜻 |
@@ -264,6 +270,7 @@ product (제품) 1 ──< N price_survey (가격 조사) 1 ──< N price_surv
 | `taobao_url` | varchar(1000) | ✅ | 구매할 타오바오 링크 (공식몰 위주) |
 | `coupang_min_price` / `coupang_url` | int(원) / varchar | | 쿠팡 최저가 · 링크 (없어도 됨) |
 | `naver_min_price` / `naver_url` | int(원) / varchar | | 네이버 최저가 · 링크 (없어도 됨) |
+| `deleted_at` | timestamptz | | 소프트 삭제 시각 |
 
 **`price_survey_option` — 옵션별 가격**
 | 컬럼 | 타입 | 필수 | 뜻 |
@@ -272,9 +279,12 @@ product (제품) 1 ──< N price_survey (가격 조사) 1 ──< N price_surv
 | `option1` | varchar(200) | ✅ | 옵션1 (예: 검정) |
 | `option2` | varchar(200) | | 옵션2 (예: L) |
 | `price_cny` | numeric(12,2) | ✅ | 옵션별 가격 (위안) |
+| `photo_url` | varchar(1000) | | 옵션별 사진 (예: 맛별 사진) |
 
 - **옵션 총 종류**는 컬럼으로 두지 않고 `price_survey_option` 행 수로 센다 — 따로 저장하면 실제 옵션 수와 어긋난다.
 - 한 제품을 여러 날 다시 조사할 수 있도록 제품 : 조사 = 1 : N.
+- **소프트 삭제**: `DELETE` 는 `deleted_at` 만 채운다. 조회는 `alive_products()` · `alive_surveys()` (제품이 삭제된 조사도 숨김)로만 한다. 코드 발급(`next_code`)은 삭제된 행까지 봐서 코드를 다시 쓰지 않는다.
+- **사진 주소로 저장** (`POST /uploads/photos/from-url`): BE 가 받아 온다 → 연결 전 호스트를 IP 로 풀어 공인 주소만 허용, 리다이렉트는 직접 따라가며 매번 다시 검사 (최대 3번), 15초 · 10MB 제한. 표준 라이브러리 `urllib` 만 쓴다 (의존성 추가 없음).
 
 ### 6.2 계정 · 회사 계정 (2026-10-18)
 
@@ -309,6 +319,48 @@ app_user 1 ──< N company_account_password_view >── 1 company_account
 | `user_id` | FK → app_user (RESTRICT) | ✅ | 누가 — 열람 기록이 있는 사용자는 지울 수 없다 (비활성화만) |
 | `ip` | varchar(64) | | 요청 IP |
 | `created_at` | timestamptz | ✅ | 언제 |
+
+### 6.3 가격 책정 (2026-10-19)
+
+```
+product 1 ──< N product_pricing (판매처별 1개) 1 ──< N option_price >── 1 price_survey_option
+exchange_rate (날짜별 위안 환율, 독립 — 최근 행 = 현재 환율)
+```
+
+**`product_pricing` — 판매처별 가격 설정** (`models/product/pricing.py`, unique `product + platform`)
+| 컬럼 | 타입 | 필수 | 뜻 |
+|---|---|---|---|
+| `product_id` | FK → product (CASCADE) | ✅ | 제품 |
+| `survey_id` | FK → price_survey | ✅ | 기준으로 쓴 가격 조사 |
+| `platform` | varchar(20) | ✅ | `coupang` / `naver` (`core/pricing_config.Platform`) |
+| `fx_rate` | numeric(12,4) | ✅ | **저장 시점 환율 (기록용)** — 계산은 현재 환율로 한다 (2026-10-20). 나중에 환율 변동으로 차익이 바뀐 걸 비교할 때 쓴다 |
+| `fx_date` | date | | 그 환율의 기준일. 고정값(200)을 쓰면 비어 있음 |
+| `fx_markup_pct` | numeric(5,2) | ✅ | 실결제 가산율 %. 기본 `DEFAULT_FX_MARKUP_PCT` (실결제 내역으로 확정 전 0) |
+| `shipping_fee` | int(원) | ✅ | **쓰지 않음** (2026-10-20 부터 옵션별 무게로 계산). 컨럼만 남아 있고 기본값 10000 으로 채워진다 |
+| `platform_fee_rate` / `payment_fee_rate` | numeric(5,2) | ✅ | 플랫폼 · 결제 수수료 % |
+
+**`option_price` — 옵션별 판매가** (unique `pricing + option`)
+| 컬럼 | 타입 | 필수 | 뜻 |
+|---|---|---|---|
+| `pricing_id` | FK → product_pricing (CASCADE) | ✅ | 어느 판매처 설정 |
+| `option_id` | FK → price_survey_option (CASCADE) | ✅ | 어느 옵션 |
+| `sale_price` | int(원) | ✅ | 판매가 — 사용자가 입력 |
+
+**`exchange_rate` — 위안 환율** (`date` unique(KST), `cny_krw`, `source`) — 가격 책정 · 배송비가 같이 쓰는 하나의 값
+- 지금은 환율 설정 화면에서 사람이 넣는다 (`PUT /exchange-rate`, `source = manual`). 하루 1건 — 같은 날 다시 넣으면 덮어쓴다.
+- **현재 환율** = 날짜 최근 행 (`services/pricing/exchange_rate_service.py`). 없으면 `DEFAULT_FX_RATE` 200 (`source = default`, DB 에 저장하지 않음).
+- 환율 API 자동 조회는 나중에 — 같은 테이블에 `source` = API 이름으로 넣는다.
+
+**배송비 — 저장하지 않고 계산** (`core/shipping_config.py`, `services/pricing/shipping_service.py`, 2026-10-20)
+- 요금: 타오바오 공식 집운-해운 한국행 **식품·민감 화물** 고정 — 첫 1kg 33위안, 넘는 무게 0.5kg 마다 2위안 (0.5kg 단위 올림), 소형 한도 30kg.
+- 무게: 옵션 이름의 총 용량(ml) × 1g + 박스 500g. 용량은 `utils/volume.py` 가 `245ml×24팩` · `1L×6팩` 같은 이름에서 읽는다 (못 읽으면 배송비 `null`).
+- 배송비는 위안으로 내려주고 원화는 FE 가 현재 환율로 환산 → 환율을 바꾸면 배송비도 자동으로 바뀐다.
+- 부피 무게 · 관세는 아직 반영하지 않는다.
+
+- **차익 · 마진율은 저장하지 않는다** — 계산값이라 따로 두면 어긋난다. 판매가만 저장하고, 화면을 열 때마다 현재 환율로 다시 계산한다.
+  `실결제환율 = 현재 환율 × (1 + fx_markup_pct/100)`, `원가+배송 = (price_cny + shipping_cny) × 실결제환율`,
+  `차익 = sale_price − 원가+배송 − sale_price × (platform_fee_rate + payment_fee_rate)/100`, `마진율 = 차익 / sale_price`.
+- 네이버 대표가 · 옵션 추가금은 저장하지 않고 등록할 때 `option_price` 에서 계산한다 (대표가 = 최저 옵션가).
 
 ---
 

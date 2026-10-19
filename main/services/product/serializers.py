@@ -55,7 +55,10 @@ def survey_detail_dict(s, options) -> dict:
         **_survey_base(s),
         "option_count": len(options),
         "options": [
-            {"id": o.id, "option1": o.option1, "option2": o.option2, "price_cny": money_cny(o.price_cny)}
+            {
+                "id": o.id, "option1": o.option1, "option2": o.option2,
+                "price_cny": money_cny(o.price_cny), "photo_url": o.photo_url,
+            }
             for o in options
         ],
     }

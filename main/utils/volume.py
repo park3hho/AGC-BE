@@ -1,0 +1,44 @@
+"""옵션 이름에서 음료 총 용량(ml)을 읽는다 — 배송비 무게 계산용 (core/shipping_config.py).
+
+    parse_volume_ml("코코넛밀크", "245ml×24팩")  → 5880
+    parse_volume_ml("1L×6팩")                   → 6000
+    parse_volume_ml("椰汁245ml*24盒")            → 5880
+    parse_volume_ml("1.5L")                     → 1500   (개수가 없으면 1개)
+    parse_volume_ml("복숭아맛")                  → None   (용량을 못 읽음)
+
+규칙: 첫 번째 "숫자 + ml/L" 를 용량으로 보고, 그 뒤의 "×N" (또는 "N팩/N개/N盒" …) 를 개수로 본다.
+"""
+
+import re
+from decimal import Decimal
+from typing import Optional
+
+# 숫자 + 단위. ml 을 l 보다 먼저 본다. 단위 뒤에 영문자가 붙으면(예: 5lb) 용량이 아니다.
+_VOLUME = re.compile(r"(\d+(?:\.\d+)?)\s*(ml|毫升|l|리터|升)(?![a-z])", re.IGNORECASE)
+# ×N — 곱하기 기호 여러 가지 (× ✕ x X * ＊)
+_TIMES = re.compile(r"^\s*[×✕xX*＊]\s*(\d+)")
+# N팩 · N개 … (곱하기 기호 없이 개수만 적은 경우)
+_COUNT_UNIT = re.compile(r"(\d+)\s*(팩|개|병|캔|입|박스|盒|瓶|罐|支|袋|听|箱)")
+
+_ML_PER_UNIT = {"ml": 1, "毫升": 1, "l": 1000, "리터": 1000, "升": 1000}
+
+
+def parse_volume_ml(*texts: Optional[str]) -> Optional[int]:
+    text = " ".join(t for t in texts if t)
+    m = _VOLUME.search(text)
+    if not m:
+        return None
+    per_unit = Decimal(m.group(1)) * _ML_PER_UNIT[m.group(2).lower()]
+
+    rest = text[m.end():]
+    count = 1
+    times = _TIMES.match(rest)
+    if times:
+        count = int(times.group(1))
+    else:
+        unit = _COUNT_UNIT.search(rest)
+        if unit:
+            count = int(unit.group(1))
+
+    total = int(per_unit * count)
+    return total if total > 0 else None

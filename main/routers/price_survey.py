@@ -5,8 +5,8 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 
 from core.auth_deps import require_auth, require_feature
 from core.permissions import Feature
-from core.response_utils import success
-from schemas.price_survey import PriceSurveyCreate
+from core.response_utils import success, success_only
+from schemas.price_survey import PriceSurveyCreate, PriceSurveyUpdate
 from services.product.price_survey_service import PriceSurveyService
 
 logger = logging.getLogger(__name__)
@@ -60,4 +60,27 @@ async def get_price_survey(survey_id: int, auth=Depends(require_auth)):
         raise
     except Exception as e:
         logger.error(f"가격 조사 상세 조회 실패: {e}")
+        raise HTTPException(status_code=500, detail="처리 중 오류가 발생했습니다.")
+
+
+@router.patch("/{survey_id}")
+async def update_price_survey(survey_id: int, body: PriceSurveyUpdate, auth=Depends(require_feature(Feature.RESEARCH))):
+    try:
+        return success(price_survey=await PriceSurveyService.update(survey_id, body))
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"가격 조사 수정 실패: {e}")
+        raise HTTPException(status_code=500, detail="처리 중 오류가 발생했습니다.")
+
+
+@router.delete("/{survey_id}")
+async def delete_price_survey(survey_id: int, auth=Depends(require_feature(Feature.RESEARCH))):
+    try:
+        await PriceSurveyService.delete(survey_id)
+        return success_only()
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"가격 조사 삭제 실패: {e}")
         raise HTTPException(status_code=500, detail="처리 중 오류가 발생했습니다.")

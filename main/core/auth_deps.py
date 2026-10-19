@@ -5,20 +5,45 @@
 #   auth=Depends(require_feature(Feature.RESEARCH))   Feature 보유
 #   auth=Depends(require_role(Role.ADMIN))            역할
 #
+# API 키 (헤더 X-API-Key) — 리서처 skill 같은 자동화용. 세션을 만들지 않는다.
+#   키로는 로그인 · research 권한만 쓸 수 있다 (API_KEY_FEATURES). 역할이 admin 이어도 그 밖은 403.
+#   발급·폐기는 scripts/api_key.py (BE PC 에서만).
+#
 # 세션에는 user_id · session_version · remember 만 둔다. 역할·활성 여부는 요청마다 DB 에서 다시 읽는다
 #   → 관리자가 비활성화·역할 변경·비밀번호 변경을 하면 다음 요청부터 바로 반영.
 
+import hashlib
 import time
+from datetime import datetime, timedelta, timezone
 
 from fastapi import Depends, HTTPException, Request
 
 from core.permissions import Feature, Role, has_feature
 from core.session import REMEMBER_KEY
-from models.user.user import User
+from models.user.user import ApiKey, User
 
 SESSION_USER_KEY = "user_id"
 SESSION_VERSION_KEY = "ver"
 SESSION_TOUCH_KEY = "t"
+
+API_KEY_HEADER = "X-API-Key"
+API_KEY_FEATURES = frozenset({Feature.RESEARCH})
+_API_KEY_TOUCH_EVERY = timedelta(minutes=5)     # last_used_at 은 5분에 한 번만 쓴다 (요청마다 쓰지 않게)
+
+
+def hash_api_key(raw: str) -> str:
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+
+
+async def _user_from_api_key(raw: str) -> User | None:
+    key = await ApiKey.get_or_none(key_hash=hash_api_key(raw.strip()), active=True).select_related("user")
+    if not key or not key.user.active:
+        return None
+    now = datetime.now(timezone.utc)
+    if key.last_used_at is None or now - key.last_used_at > _API_KEY_TOUCH_EVERY:
+        key.last_used_at = now
+        await key.save(update_fields=["last_used_at"])
+    return key.user
 
 
 def start_session(request: Request, user: User, remember: bool) -> None:
@@ -50,14 +75,23 @@ async def current_user(request: Request) -> User | None:
 
 
 async def require_auth(request: Request) -> dict:
+    raw_key = request.headers.get(API_KEY_HEADER)
+    if raw_key is not None:
+        # 키를 보냈으면 키로만 판단한다 (틀린 키로 세션에 기대지 않는다)
+        user = await _user_from_api_key(raw_key)
+        if not user:
+            raise HTTPException(status_code=401, detail="API 키가 올바르지 않거나 폐기되었습니다.")
+        return {"user_id": user.id, "role": user.role, "user": user, "via_api_key": True}
     user = await current_user(request)
     if not user:
         raise HTTPException(status_code=401, detail="로그인이 필요합니다.")
-    return {"user_id": user.id, "role": user.role, "user": user}
+    return {"user_id": user.id, "role": user.role, "user": user, "via_api_key": False}
 
 
 def require_feature(feature: Feature):
     async def checker(auth: dict = Depends(require_auth)) -> dict:
+        if auth["via_api_key"] and feature not in API_KEY_FEATURES:
+            raise HTTPException(status_code=403, detail="API 키로는 쓸 수 없는 기능입니다.")
         if not has_feature(auth["role"], feature):
             raise HTTPException(status_code=403, detail="권한이 없습니다.")
         return auth
@@ -67,7 +101,7 @@ def require_feature(feature: Feature):
 
 def require_role(role: Role):
     async def checker(auth: dict = Depends(require_auth)) -> dict:
-        if auth["role"] != role:
+        if auth["via_api_key"] or auth["role"] != role:
             raise HTTPException(status_code=403, detail="권한이 없습니다.")
         return auth
 

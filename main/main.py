@@ -9,7 +9,18 @@ from tortoise.contrib.fastapi import RegisterTortoise
 from core.config import UPLOAD_DIR, UPLOAD_URL_PREFIX, setup_middlewares
 from core.response_utils import success
 from database import TORTOISE_ORM
-from routers import auth, company_account, health, price_survey, product, upload, users
+from routers import (
+    auth,
+    company_account,
+    exchange_rate,
+    health,
+    price_survey,
+    pricing,
+    product,
+    shipping,
+    upload,
+    users,
+)
 
 logging.basicConfig(
     level=logging.INFO,
@@ -44,6 +55,9 @@ app.include_router(users.router)
 app.include_router(company_account.router)
 app.include_router(product.router)
 app.include_router(price_survey.router)
+app.include_router(pricing.router)
+app.include_router(exchange_rate.router)
+app.include_router(shipping.router)
 app.include_router(upload.router)
 
 # 업로드된 사진 내려주기 — /files/photos/2026/10/xxx.jpg

@@ -10,6 +10,7 @@ class Product(BaseModel):
     photo_url = fields.CharField(max_length=1000, null=True)      # 제품 사진 (이미지 주소)
     title_cn = fields.CharField(max_length=300)                   # 중국어 제목 (타오바오 원제)
     title_ko = fields.CharField(max_length=300, null=True)        # 한국어 제목 (판매용)
+    deleted_at = fields.DatetimeField(null=True)                  # 소프트 삭제 시각 — 값이 있으면 목록·상세에서 숨김
 
     class Meta:
         table = "product"

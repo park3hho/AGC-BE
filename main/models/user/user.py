@@ -15,3 +15,18 @@ class User(BaseModel):
 
     class Meta:
         table = "app_user"     # "user" 는 Postgres 예약어
+
+
+class ApiKey(BaseModel):
+    """자동화용 API 키 (리서처 skill 등). 헤더 X-API-Key 로 받는다.
+    원문은 발급할 때 한 번만 보여주고 DB 에는 sha256 해시만 둔다. 키로는 로그인·research 권한만 쓸 수 있다 (core/auth_deps.py)."""
+
+    user = fields.ForeignKeyField("models.User", related_name="api_keys", on_delete=fields.CASCADE)  # 이 사용자로 동작
+    name = fields.CharField(max_length=100)                       # 용도 메모 (예: 리서처 skill)
+    key_prefix = fields.CharField(max_length=16)                  # 원문 앞부분 — 목록에서 어느 키인지 구분용
+    key_hash = fields.CharField(max_length=64, unique=True)       # sha256(원문) hex
+    active = fields.BooleanField(default=True)                    # False = 폐기
+    last_used_at = fields.DatetimeField(null=True)                # 마지막 사용 시각
+
+    class Meta:
+        table = "api_key"
