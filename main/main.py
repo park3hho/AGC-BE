@@ -1,3 +1,5 @@
+import asyncio
+import contextlib
 import logging
 import os
 from contextlib import asynccontextmanager
@@ -9,6 +11,7 @@ from tortoise.contrib.fastapi import RegisterTortoise
 from core.config import UPLOAD_DIR, UPLOAD_URL_PREFIX, setup_middlewares
 from core.response_utils import success
 from database import TORTOISE_ORM
+from services.pricing.exchange_rate_service import fx_auto_loop
 from routers import (
     auth,
     company_account,
@@ -33,7 +36,14 @@ async def lifespan(app: FastAPI):
     # Tortoise 1.x: Tortoise.init() 만 하면 요청 핸들러에서 연결이 안 보인다
     #   ("No TortoiseContext is currently active"). FastAPI 연동은 RegisterTortoise 로 한다.
     async with RegisterTortoise(app, config=TORTOISE_ORM):
-        yield
+        # 환율 자동 받기 — DB 연결이 살아 있는 동안만 돈다 (core/pricing_config.FX_AUTO_INTERVAL_SEC)
+        fx_task = asyncio.create_task(fx_auto_loop())
+        try:
+            yield
+        finally:
+            fx_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await fx_task
 
 
 # API 문서(Swagger·ReDoc·openapi.json)는 기본 비공개. dev 에서는 .env 에 ENABLE_DOCS=1.

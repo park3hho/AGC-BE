@@ -19,9 +19,23 @@ DEFAULT_FX_RATE = 200
 
 
 class FxSource(str, Enum):
-    """exchange_rate.source — 환율을 어디서 받았는지. 환율 API 를 붙이면 API 이름을 추가한다."""
-    MANUAL = "manual"      # 환율 설정 화면에서 사람이 넣음
+    """exchange_rate.source — 환율을 어디서 받았는지. FE pricingConst.FX_SOURCE_LABEL 과 같아야 한다."""
+    MANUAL = "manual"      # 환율 설정 화면에서 사람이 넣음 — 그날은 자동으로 덮어쓰지 않는다
+    HANA = "hana"          # 하나은행 고시 매매기준율 (자동)
+    OPEN_ER = "open_er_api"  # open.er-api (자동, 하나은행을 못 받을 때 예비)
     DEFAULT = "default"    # 저장된 환율이 없어 DEFAULT_FX_RATE 를 씀 (DB 에는 저장하지 않는 값)
+
+
+# 환율 자동 받기 (2026-10-21) — services/pricing/fx_fetch.py
+#   1순위 하나은행 고시 매매기준율: 네이버 금융 데이터 (키 불필요, 비공식 경로라 바뀔 수 있음)
+#   2순위 open.er-api (키 불필요, 하루 1번 갱신)
+#   한국수출입은행 공식 API 는 인증키가 필요해서 쓰지 않음
+FX_HANA_URL = "https://m.stock.naver.com/front-api/marketIndex/productDetail?category=exchange&reutersCode=FX_CNYKRW"
+FX_OPEN_ER_URL = "https://open.er-api.com/v6/latest/CNY"
+FX_FETCH_TIMEOUT_SEC = 10
+FX_AUTO_INTERVAL_SEC = 3600      # 매시간 오늘 환율을 다시 받는다 (서버가 켜질 때도 한 번)
+FX_SANE_MIN = 100               # 이 범위를 벗어난 값은 잘못 받은 것으로 보고 버린다 (원/위안)
+FX_SANE_MAX = 400
 
 
 # 환율 설정 화면에 보여줄 최근 기록 수

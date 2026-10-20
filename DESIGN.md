@@ -348,9 +348,12 @@ exchange_rate (날짜별 위안 환율, 독립 — 최근 행 = 현재 환율)
 | `sale_price` | int(원) | ✅ | 판매가 — 사용자가 입력 |
 
 **`exchange_rate` — 위안 환율** (`date` unique(KST), `cny_krw`, `source`) — 가격 책정 · 배송비가 같이 쓰는 하나의 값
-- 지금은 환율 설정 화면에서 사람이 넣는다 (`PUT /exchange-rate`, `source = manual`). 하루 1건 — 같은 날 다시 넣으면 덮어쓴다.
-- **현재 환율** = 날짜 최근 행 (`services/pricing/exchange_rate_service.py`). 없으면 `DEFAULT_FX_RATE` 200 (`source = default`, DB 에 저장하지 않음).
-- 환율 API 자동 조회는 나중에 — 같은 테이블에 `source` = API 이름으로 넣는다.
+- 하루 1건 — 같은 날은 덮어쓴다. **현재 환율** = 날짜 최근 행 (`services/pricing/exchange_rate_service.py`). 없으면 `DEFAULT_FX_RATE` 200 (`source = default`, DB 에 저장하지 않음).
+- **자동 받기** (2026-10-21): `main.py` lifespan 이 `fx_auto_loop` 를 띄운다 — 서버가 켜질 때 + `FX_AUTO_INTERVAL_SEC`(1시간)마다 오늘 값을 갱신.
+  - 출처 (`services/pricing/fx_fetch.py`, 표준 라이브러리 urllib): ① 하나은행 고시 매매기준율 — 네이버 금융 데이터 (`source = hana`, 키 불필요, 비공식 경로라 바뀔 수 있음) → ② open.er-api (`open_er_api`, 하루 1번 갱신). 범위(`FX_SANE_MIN~MAX`) 밖 값은 버린다.
+  - 둘 다 실패하면 로그만 남기고 마지막 저장값으로 계속 계산한다 (다음 차례에 다시).
+  - 한국수출입은행 공식 API 는 인증키가 필요해 쓰지 않는다 (필요하면 `.env` 키 + 출처 추가).
+- **직접 입력** (`PUT /exchange-rate`, `source = manual`)은 그날 자동으로 덮어쓰지 않는다. 화면의 '지금 받아오기'(`POST /exchange-rate/refresh`)는 직접 입력값도 바꾼다.
 
 **배송비 — 저장하지 않고 계산** (`core/shipping_config.py`, `services/pricing/shipping_service.py`, 2026-10-20)
 - 요금: 타오바오 공식 집운-해운 한국행 **식품·민감 화물** 고정 — 첫 1kg 33위안, 넘는 무게 0.5kg 마다 2위안 (0.5kg 단위 올림), 소형 한도 30kg.
