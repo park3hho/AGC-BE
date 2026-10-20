@@ -12,7 +12,7 @@ class Role(StrEnum):
 class Feature(StrEnum):
     RESEARCH = "research"            # 제품·가격 조사 입력
     ACCOUNT_VIEW = "account_view"    # 회사 계정 보기 (비밀번호 열람 포함, 열람 기록 남음)
-    ACCOUNT_EDIT = "account_edit"    # 회사 계정 추가
+    ACCOUNT_EDIT = "account_edit"    # 회사 계정 추가·수정·삭제
     USER_MANAGE = "user_manage"      # 사용자 관리
 
 
