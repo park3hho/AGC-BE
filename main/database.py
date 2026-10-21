@@ -16,6 +16,7 @@ TORTOISE_ORM = {
                 # user — 로그인 계정 · company_account — 회사 외부 서비스 계정 + 비밀번호 열람 기록
                 "models.user.user",
                 "models.company_account.company_account",
+                "models.company_account.api_credential",   # API 키 묶음 · 비밀값 · 열람 기록
                 "aerich.models",
             ],
             "default_connection": "default",
