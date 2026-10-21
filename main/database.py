@@ -17,6 +17,7 @@ TORTOISE_ORM = {
                 "models.user.user",
                 "models.company_account.company_account",
                 "models.company_account.api_credential",   # API 키 묶음 · 비밀값 · 열람 기록
+                "models.shipping.address",   # 출고지·반품지 주소록 (마켓 주소 코드)
                 "aerich.models",
             ],
             "default_connection": "default",

@@ -14,6 +14,7 @@ from database import TORTOISE_ORM
 from services.pricing.exchange_rate_service import fx_auto_loop
 from routers import (
     api_credential,
+    shipping_address,
     auth,
     company_account,
     detail_page,
@@ -66,6 +67,7 @@ app.include_router(auth.router)
 app.include_router(users.router)
 app.include_router(company_account.router)
 app.include_router(api_credential.router)
+app.include_router(shipping_address.router)
 app.include_router(product.router)
 app.include_router(price_survey.router)
 app.include_router(pricing.router)
