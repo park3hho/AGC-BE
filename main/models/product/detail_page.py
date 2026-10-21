@@ -20,7 +20,7 @@ class DetailPage(BaseModel):
     )
     reviewed_at = fields.DatetimeField(null=True)
     review_note = fields.TextField(null=True)
-    review_checks = fields.JSONField(null=True)                        # 승인 때 체크한 REVIEW_CHECKS 키 목록
+    review_checks = fields.JSONField(null=True)                        # 예전 기록용 (5개 체크리스트 폐지 후 항상 null)
 
     class Meta:
         table = "detail_page"

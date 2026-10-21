@@ -394,7 +394,7 @@ detail_page_common (행 1개, id=1 — S6 해외구매대행 안내 + 등록번�
 | `status` | varchar(20) | ✅ | `draft` 초안 → `review` 검수 대기 → `approved` 승인 / `changes` 수정 필요 (`core/detail_page_config.DetailStatus`) |
 | `updated_by_id` | FK → app_user (SET NULL) | | 마지막으로 내용을 바꾼 사람 |
 | `reviewed_by_id` · `reviewed_at` · `review_note` | FK · timestamptz · text | | 마지막 검수 (승인 또는 수정 요청) — 누가 · 언제 · 메모 |
-| `review_checks` | jsonb | | 승인 때 체크한 휴먼 체크 항목 키 |
+| `review_checks` | jsonb | | 예전 기록용 (5개 체크리스트 폐지 2026-10-22 이후 항상 null) |
 
 **`detail_page_review`** — `action`(`submit` 검수 요청 · `approve` · `changes` · `reset` 자동 되돌림), `user_id`, `note`, `checks`, `created_at`. 지우지 않는다.
 
@@ -414,8 +414,8 @@ detail_page_common (행 1개, id=1 — S6 해외구매대행 안내 + 등록번�
 **규칙**
 - 목록 대상 = **가격 책정 완료** 제품 (모든 판매처 판매가 저장 — FE `pricingStatusOf` 의 `done`).
 - 템플릿 채우기 (`build_template`): 제품 이름 · 최근 가격 조사의 옵션(option1 = 맛, option2 = 용량·입수) · 옵션별 사진으로 칸을 채우고, 사람이 써야 하는 칸은 `[[...]]` **확인 표시**로 남긴다. 페이지가 없으면 GET 이 템플릿만 주고(저장 안 함), 첫 PUT 이 초안으로 만든다.
-- **확인 표시 `[[...]]`** (`MARKER_RE`): 미리보기에 노란 표시로 보이고, content 나 공통 안내에 하나라도 남아 있으면 승인할 수 없다 (가안 문구는 `[[가안]]`).
-- **승인 조건** (전부 BE 가 다시 확인): 상태 `review` · 휴먼 체크 5항목(`REVIEW_CHECKS`: 등록번호 · 원재료 라벨 대조 · 사진 속 중국 현지 프로모 · 효능·과장 표현 · 가안 문구) 전부 · 등록번호가 비거나 `0000-0000000` 같은 자리표시가 아님 · 확인 표시 0개 · 사람 로그인(`detail_review`, API 키 불가).
+- **확인 표시 `[[...]]`** (`MARKER_RE`): 미리보기에 노란 표시로 보인다 (가안 문구는 `[[가안]]`). 남아 있어도 승인은 되고 FE 가 경고만 한다 (`marker_count`).
+- **승인 = 휴먼 체크 '확인' 한 번** (2026-10-22 사용자 결정: "확인 누르면 휴먼체크한 걸로"). 예전 5항목 체크리스트 · 등록번호 필수 · 확인 표시 0개 조건은 없얗다. 남은 조건: 사람 로그인(`detail_review`, API 키 불가) · 아직 승인 안 됨(`draft` · `review` · `changes` 어디서든). 등록번호 미입력(`reg_no_ready` false) · 확인 표시는 FE 경고만. `checks` 는 받아도 무시, `review_checks` 는 null.
 - **승인 = 지금 보이는 그대로를 사람이 확인함.** 승인 뒤 content 가 바뀌면 그 페이지는 검수 대기로, 공통 안내가 바뀌면 승인된 페이지 전부 검수 대기로 돌아간다 (`reset` 기록).
 - 수정 요청은 메모 필수, `review` · `approved` 에서만. 수정 필요는 고친 뒤 다시 검수 요청(`submit`)해야 검수 대기가 된다.
 - **상품 등록(다음 단계)은 `approved` 상세페이지만 받는다.** 등록 직전에 상태를 다시 읽어 확인한다 (등록 중 내용이 바뀌면 검수 대기가 되므로).

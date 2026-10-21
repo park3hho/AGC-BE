@@ -7,7 +7,7 @@ from typing import Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from core.detail_page_config import HOW_ICONS, REVIEW_CHECKS
+from core.detail_page_config import HOW_ICONS
 
 T_SHORT = 100      # 배지 · 칩 · 제목 같은 짧은 칸
 T_LINE = 300       # 한 줄 문장
@@ -116,8 +116,9 @@ class DetailPageSave(BaseModel):
 
 
 class DetailPageApprove(BaseModel):
-    """POST /detail-pages/{product_id}/approve — 휴먼 체크 항목을 전부 보내야 한다 (빠지면 400)."""
-    checks: list[str] = Field(max_length=len(REVIEW_CHECKS) * 2)
+    """POST /detail-pages/{product_id}/approve — 휴먼 체크 = 사람이 미리보기를 보고 "확인" 한 번.
+    checks 는 예전 FE 호환용으로만 받고 무시한다."""
+    checks: Optional[list[str]] = Field(default=None, max_length=20)
     note: Optional[str] = Field(default=None, max_length=T_TEXT)
 
 

@@ -1,6 +1,6 @@
 # core/detail_page_config.py
 # 상세페이지(디자인) 상수 — 상태 · 휴먼 체크 항목 · 확인 표시 규칙 · 공통 안내 기본값. 진실의 원천은 여기.
-#   FE constants/designConst.js 와 문자열이 같아야 한다 (DETAIL_STATUS · REVIEW_CHECKS).
+#   FE constants/designConst.js 와 문자열이 같아야 한다 (DETAIL_STATUS).
 
 import re
 from enum import Enum
@@ -10,7 +10,7 @@ class DetailStatus(str, Enum):
     """detail_page.status — 초안 → 검수 대기 → 승인 / 수정 필요."""
     DRAFT = "draft"          # 초안 — 만들기만 하고 아직 검수 요청 안 함
     REVIEW = "review"        # 검수 대기 — 사람이 확인할 차례
-    APPROVED = "approved"    # 승인 — 사람이 휴먼 체크를 모두 하고 승인. 상품 등록은 이 상태만 받는다
+    APPROVED = "approved"    # 승인 — 사람이 미리보기를 보고 "확인" 을 누름. 상품 등록은 이 상태만 받는다
     CHANGES = "changes"      # 수정 필요 — 검수자가 메모와 함께 돌려보냄
 
 
@@ -22,8 +22,9 @@ class ReviewAction(str, Enum):
     RESET = "reset"          # 승인 후 내용·공통 안내가 바뀌어 검수 대기로 되돌아감 (자동)
 
 
-# 휴먼 체크 — 승인하려면 전부 체크해야 한다. FE REVIEW_CHECKS 와 키가 같아야 한다
-REVIEW_CHECKS = (
+# 휴먼 체크 — 사람이 미리보기를 보고 "확인" 한 번 누르면 끝 (2026-10-22 사용자 결정 — 아래 5개 체크리스트 폐지).
+#   아래 키는 예전 기록(detail_page.review_checks · detail_page_review.checks)을 읽을 때의 참고용으로만 남긴다.
+LEGACY_REVIEW_CHECKS = (
     "reg_no",        # 수입식품등 인터넷 구매대행업 등록번호 확인
     "ingredients",   # 원재료를 실제 라벨과 대조
     "photo_promo",   # 사진 속 중국 현지 프로모션·문구 확인
@@ -31,10 +32,10 @@ REVIEW_CHECKS = (
     "draft_copy",    # 가안 문구 확정
 )
 
-# 확인 표시 — 본문에 [[...]] 로 쓴 부분. 미리보기에 노란 표시로 보이고, 하나라도 남아 있으면 승인할 수 없다
+# 확인 표시 — 본문에 [[...]] 로 쓴 부분. 미리보기에 노란 표시로 보인다. 남아 있어도 확인(승인)은 되고 FE 가 경고만 한다
 MARKER_RE = re.compile(r"\[\[(.+?)\]\]")
 
-# 등록번호 — 비었거나 0 과 - 만 있으면(자리표시) 승인할 수 없다
+# 등록번호 — 비었거나 0 과 - 만 있으면(자리표시) 미입력으로 보고 FE 가 경고한다 (확인은 막지 않음)
 REG_NO_PLACEHOLDER_RE = re.compile(r"^[0\-\s]*$")
 
 # 공통 안내 (S6 · 등록번호) 기본값 — detail_page_common 행이 없을 때 이 값으로 만든다

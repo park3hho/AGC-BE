@@ -11,7 +11,6 @@ from core.detail_page_config import (
     DEFAULT_COMMON,
     MARKER_RE,
     REG_NO_PLACEHOLDER_RE,
-    REVIEW_CHECKS,
     REVIEW_HISTORY_SIZE,
     DetailStatus,
     ExportPlatform,
@@ -104,7 +103,7 @@ def _photos(p: Product, options: list[PriceSurveyOption]) -> list[dict]:
 
 def build_template(p: Product, options: list[PriceSurveyOption]) -> dict:
     """제품 + 최근 조사 옵션으로 템플릿을 채운다. 사람이 써야 하는 칸은 [[...]] 확인 표시로 남긴다
-    (확인 표시가 하나라도 남으면 승인할 수 없다)."""
+    (남아 있어도 확인은 되지만 FE 가 경고를 보여준다)."""
     sizes = _uniq(o.option2 for o in options)
     size_text = ", ".join(sizes) if sizes else "[[용량 · 수량]]"
     flavor_names = _uniq(o.option1 for o in options)
@@ -278,7 +277,6 @@ class DetailPageService:
             "template": template,          # 페이지가 없을 때 처음 채울 값 (저장하지 않은 상태)
             "photos": _photos(p, options),
             "common": _common_dict(common),
-            "checks": list(REVIEW_CHECKS),
         }
 
     @staticmethod
@@ -312,28 +310,22 @@ class DetailPageService:
 
     @staticmethod
     async def approve(product_id: int, body: DetailPageApprove, user_id: int) -> dict:
+        """휴먼 체크 = 사람이 미리보기를 보고 "확인" 한 번 (2026-10-22 사용자 결정 — 체크리스트 없음).
+        초안 · 검수 대기 · 수정 필요 어디서든 바로 승인한다. 등록번호 · 확인 표시([[...]])는 막지 않고
+        FE 에서 경고만 보여준다."""
         async with in_transaction() as conn:
             dp = await DetailPage.filter(product_id=product_id).using_db(conn).select_for_update().first()
             if dp is None:
                 await _get_page(product_id)      # 404 메시지
-            if dp.status != DetailStatus.REVIEW:
-                raise HTTPException(status_code=400, detail="검수 대기인 상세페이지만 승인할 수 있습니다.")
-            missing = [c for c in REVIEW_CHECKS if c not in set(body.checks)]
-            if missing:
-                raise HTTPException(status_code=400, detail="휴먼 체크 항목을 모두 확인해야 승인할 수 있습니다.")
-            common = await _get_common()
-            if not reg_no_ready(common.reg_no):
-                raise HTTPException(status_code=400, detail="등록번호가 비어 있습니다. 공통 안내에 실제 등록번호를 넣어주세요.")
-            left = count_markers(dp.content) + count_markers(_common_payload(common))
-            if left:
-                raise HTTPException(status_code=400, detail=f"확인 표시([[...]])가 {left}개 남아 있습니다. 문구를 확정해주세요.")
+            if dp.status == DetailStatus.APPROVED:
+                raise HTTPException(status_code=400, detail="이미 확인(승인)된 상세페이지입니다.")
             dp.status = DetailStatus.APPROVED
             dp.reviewed_by_id = user_id
             dp.reviewed_at = datetime.now(timezone.utc)
             dp.review_note = (body.note or "").strip() or None
-            dp.review_checks = list(REVIEW_CHECKS)
+            dp.review_checks = None
             await dp.save(using_db=conn)
-            await _log(dp.id, ReviewAction.APPROVE, user_id, dp.review_note, list(REVIEW_CHECKS), conn=conn)
+            await _log(dp.id, ReviewAction.APPROVE, user_id, dp.review_note, conn=conn)
         return await _page_dict(await DetailPage.get(id=dp.id))
 
     @staticmethod
