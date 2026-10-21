@@ -380,7 +380,7 @@ detail_page_common (행 1개, id=1 — S6 해외구매대행 안내 + 등록번�
 템플릿 = S1 대표 사진 · S2 포인트 · S3 맛 선택 · S4 제품 정보 · S5 마시는 법·보관 · S6 해외구매대행 안내(공통), 폭 860px (기준: 루트 `detail-page-mockup.pdf`, 2026-10-21 사용자 승인한 구조). S1~S5 칸 값은 `detail_page.content`, S6 는 `detail_page_common` 한 곳에서만 고친다.
 
 **`detail_page`** (`models/product/detail_page.py`)
-| 컨럼 | 타입 | 필수 | 뜻 |
+| 컬럼 | 타입 | 필수 | 뜻 |
 |---|---|---|---|
 | `product_id` | FK → product, unique (CASCADE) | ✅ | 제품 1 : 상세페이지 1 |
 | `content` | jsonb | ✅ | 템플릿 칸 값 — 모양은 `schemas/detail_page.DetailContent` (모르는 키는 버리고 빠진 칸은 빈 값) |
