@@ -1,12 +1,13 @@
 import logging
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
 
 from core.auth_deps import require_feature
-from core.detail_page_config import DetailStatus
+from core.detail_page_config import DetailStatus, ExportPlatform
 from core.permissions import Feature
 from core.response_utils import success
 from schemas.detail_page import DetailCommonSave, DetailPageApprove, DetailPageRequestChanges, DetailPageSave
+from services.product.detail_export_service import read_uploads
 from services.product.detail_page_service import STATUS_NONE, DetailPageService
 
 logger = logging.getLogger(__name__)
@@ -89,6 +90,30 @@ async def approve_detail_page(
         raise
     except Exception as e:
         _fail("승인", e)
+
+
+@router.post("/{product_id}/exports")
+async def save_export(
+    product_id: int,
+    platform: ExportPlatform = Form(...),
+    content_hash: str = Form(..., min_length=64, max_length=64),
+    template: str = Form(default="", max_length=50),
+    files: list[UploadFile] = File(...),
+    auth=Depends(require_feature(Feature.DETAIL_REVIEW)),
+):
+    # 승인한 사람(검수 권한)이 그린 JPG 조각만 받는다 — API 키 불가
+    try:
+        blobs = await read_uploads(files)
+        return success(export=await DetailPageService.save_export(
+            product_id, platform, content_hash, template, blobs, auth["user_id"]
+        ))
+    except HTTPException:
+        raise
+    except Exception as e:
+        _fail("이미지 내보내기", e)
+    finally:
+        for f in files:
+            await f.close()
 
 
 @router.post("/{product_id}/request-changes")

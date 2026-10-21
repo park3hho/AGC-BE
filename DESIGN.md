@@ -380,6 +380,7 @@ exchange_rate_log (저장할 때마다 한 줄 — 추이 그래프, 독립)
 
 ```
 product 1 ── 0..1 detail_page 1 ──< N detail_page_review (검수 기록)
+                           detail_page 1 ──< N detail_page_export (상세 이미지 JPG · 판매처별 버전)
 detail_page_common (행 1개, id=1 — S6 해외구매대행 안내 + 등록번호, 모든 페이지가 같이 씀)
 ```
 
@@ -399,6 +400,17 @@ detail_page_common (행 1개, id=1 — S6 해외구매대행 안내 + 등록번�
 
 **`detail_page_common`** — `reg_no`(수입식품등 인터넷 구매대행업 등록번호) · `seller` · `notice_title` · `notice`(jsonb `[{title, body}]`). 행이 없으면 `DEFAULT_COMMON` 으로 만든다.
 
+**`detail_page_export`** — 상세 이미지 내보내기 (마이그레이션 12, 2026-10-22). 지우지 않는다.
+| 컨럼 | 타입 | 필수 | 뜻 |
+|---|---|---|---|
+| `page_id` | FK → detail_page (CASCADE) | ✅ | |
+| `platform` | varchar(20) | ✅ | `naver` (폭 860) · `coupang` (폭 780) — `core/detail_page_config.ExportPlatform` · `EXPORT_WIDTHS` |
+| `version` | int | ✅ | 판매처별 1, 2, 3 … (`page_id, platform, version` unique) |
+| `content_hash` | varchar(64) | ✅ | 그린 시점 content + 공통 안내의 sha256 — 지금 해시와 같으면 `current` |
+| `template` | varchar(50) | ✅ | FE 템플릿 버전 (`DETAIL_TEMPLATE_VERSION`) |
+| `files` | jsonb | ✅ | 조각 순서대로 `[{url, width, height, size, sha256}]` |
+| `created_by_id` | FK → app_user (SET NULL) | | 올린 사람 |
+
 **규칙**
 - 목록 대상 = **가격 책정 완료** 제품 (모든 판매처 판매가 저장 — FE `pricingStatusOf` 의 `done`).
 - 템플릿 채우기 (`build_template`): 제품 이름 · 최근 가격 조사의 옵션(option1 = 맛, option2 = 용량·입수) · 옵션별 사진으로 칸을 채우고, 사람이 써야 하는 칸은 `[[...]]` **확인 표시**로 남긴다. 페이지가 없으면 GET 이 템플릿만 주고(저장 안 함), 첫 PUT 이 초안으로 만든다.
@@ -407,7 +419,11 @@ detail_page_common (행 1개, id=1 — S6 해외구매대행 안내 + 등록번�
 - **승인 = 지금 보이는 그대로를 사람이 확인함.** 승인 뒤 content 가 바뀌면 그 페이지는 검수 대기로, 공통 안내가 바뀌면 승인된 페이지 전부 검수 대기로 돌아간다 (`reset` 기록).
 - 수정 요청은 메모 필수, `review` · `approved` 에서만. 수정 필요는 고친 뒤 다시 검수 요청(`submit`)해야 검수 대기가 된다.
 - **상품 등록(다음 단계)은 `approved` 상세페이지만 받는다.** 등록 직전에 상태를 다시 읽어 확인한다 (등록 중 내용이 바뀌면 검수 대기가 되므로).
-- 이미지(PNG)는 BE 가 만들지 않는다 — FE 가 같은 템플릿을 860px 로 그려 내려받는다 (FE DESIGN §4.7).
+- **상세 이미지(JPG)** 는 BE 가 그리지 않는다 — FE 가 같은 템플릿을 Pretendard(앱에 실은 글꼴)로 그려 섹션 경계에서 3000px 이하로 자르고, 네이버 860 · 쿠팡 780 JPG 를 올린다 (FE DESIGN §4.7). BE(`services/product/detail_export_service.py`)는 받기만 한다:
+  - 상태 `approved` · `content_hash` 가 지금 해시와 같아야 한다 (그 사이 바뀌면 409) · 사람 로그인(`detail_review`).
+  - 조각마다 JPEG 머리를 읽어 폭 = 판매처 폭, 높이 ≤ `EXPORT_MAX_HEIGHT`(3000), 20장 이하, 합계 10MB 이하 (nginx `client_max_body_size 11m`). 판매처 하나씩 올린다.
+  - 저장: `{UPLOAD_DIR}/detail/{제품 코드}/v{버전}/{코드}_{판매처}_{순번}.jpg` → `/files/detail/…` (버전마다 새 폴더, 덮어쓰지 않음). 기록 저장이 실패하면 쓴 파일을 지운다.
+  - 내용이 바뀌어 검수 대기로 돌아가도 옛 이미지 기록은 남는다 (`current: false`). 상품 등록은 `approved` + `current` 인 이미지만 쓴다.
 
 ---
 

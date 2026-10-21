@@ -14,6 +14,7 @@ from core.detail_page_config import (
     REVIEW_CHECKS,
     REVIEW_HISTORY_SIZE,
     DetailStatus,
+    ExportPlatform,
     ReviewAction,
 )
 from core.pricing_config import Platform
@@ -22,6 +23,7 @@ from models.product.price_survey import PriceSurveyOption
 from models.product.pricing import ProductPricing
 from models.product.product import Product
 from schemas.detail_page import DetailCommonSave, DetailContent, DetailPageApprove, DetailPageSave
+from services.product import detail_export_service as exports
 from services.product.price_survey_service import alive_surveys
 from services.product.product_service import alive_products
 from services.product.serializers import product_dict
@@ -184,6 +186,7 @@ def _page_summary(dp: DetailPage) -> dict:
 
 async def _page_dict(dp: DetailPage) -> dict:
     await dp.fetch_related("updated_by", "reviewed_by")
+    c_hash = exports.content_hash(dp.content, _common_payload(await _get_common()))
     reviews = await (
         DetailPageReview.filter(page_id=dp.id).order_by("-id").limit(REVIEW_HISTORY_SIZE).prefetch_related("user")
     )
@@ -193,6 +196,8 @@ async def _page_dict(dp: DetailPage) -> dict:
         "content": dp.content,
         "review_checks": dp.review_checks or [],
         "marker_count": count_markers(dp.content),
+        "content_hash": c_hash,                              # 내보내기 때 그린 시점 확인용 (content + 공통 안내)
+        "exports": await exports.latest_exports(dp.id, c_hash),
         "reviews": [
             {
                 "action": r.action.value if hasattr(r.action, "value") else r.action,
@@ -347,6 +352,21 @@ class DetailPageService:
             await dp.save(using_db=conn)
             await _log(dp.id, ReviewAction.CHANGES, user_id, note, conn=conn)
         return await _page_dict(await DetailPage.get(id=dp.id))
+
+    @staticmethod
+    async def save_export(product_id: int, platform: ExportPlatform, c_hash: str, template: str,
+                          blobs: "list[bytes]", user_id: int) -> dict:
+        """상세 이미지(JPG 조각) 저장 — 승인된 페이지 · 그린 시점 해시가 지금과 같을 때만."""
+        p = await _get_product(product_id)
+        dp = await _get_page(product_id)
+        exports.require_approved(dp)
+        now_hash = exports.content_hash(dp.content, _common_payload(await _get_common()))
+        if c_hash != now_hash:
+            raise HTTPException(status_code=409, detail="그린 뒤 상세페이지가 바뀌었습니다. 다시 불러와 내보내주세요.")
+        meta = exports.check_slices(platform, blobs)
+        e = await exports.store_export(dp, p.code, platform, blobs, meta, now_hash, template, user_id)
+        await e.fetch_related("created_by")
+        return exports.export_dict(e, now_hash)
 
     @staticmethod
     async def get_common() -> dict:

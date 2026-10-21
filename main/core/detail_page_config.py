@@ -57,3 +57,18 @@ HOW_ICONS = ("cold", "run", "bottle", "cup", "clock", "sun")
 
 # 검수 기록을 상세 응답에 몇 건까지 줄지
 REVIEW_HISTORY_SIZE = 10
+
+
+# ── 상세 이미지 내보내기 (JPG) ─────────────────────────────────
+# 승인된 상세페이지를 판매처별 폭의 JPG 조각으로 잘라 저장한다. FE utils/exportJpg.js · constants/designConst.EXPORT_* 와 같아야 한다
+class ExportPlatform(str, Enum):
+    """detail_page_export.platform — 상세 이미지를 올릴 판매처."""
+    NAVER = "naver"          # 네이버 스마트스토어 — 폭 860px
+    COUPANG = "coupang"      # 쿠팡 — 폭 780px (860px 그림을 줄임)
+
+
+EXPORT_WIDTHS = {ExportPlatform.NAVER: 860, ExportPlatform.COUPANG: 780}
+EXPORT_MAX_HEIGHT = 3000                 # 조각 1장 최대 높이 (px) — 쿠팡 권장 3000 · 네이버 권장 5000 중 작은 값
+EXPORT_MAX_FILES = 20                    # 한 판매처 조각 최대 개수
+EXPORT_MAX_TOTAL_BYTES = 10 * 1024 * 1024    # 한 번에 올리는 조각 합계 (nginx client_max_body_size 11m 안)
+EXPORT_DIR = "detail"                    # UPLOAD_DIR 아래 폴더 — detail/{제품 코드}/v{버전}/{코드}_{판매처}_{순번}.jpg

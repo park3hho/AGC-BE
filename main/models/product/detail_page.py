@@ -1,6 +1,6 @@
 from tortoise import fields
 
-from core.detail_page_config import DetailStatus, ReviewAction
+from core.detail_page_config import DetailStatus, ExportPlatform, ReviewAction
 from models.base import BaseModel
 
 
@@ -39,6 +39,25 @@ class DetailPageReview(BaseModel):
 
     class Meta:
         table = "detail_page_review"
+
+
+class DetailPageExport(BaseModel):
+    """상세 이미지 내보내기 — 승인된 상세페이지를 판매처 폭의 JPG 조각으로 저장한 기록. 판매처마다 버전이 1씩 오른다.
+    content_hash = 그린 시점의 content + 공통 안내 해시 (지금 해시와 다르면 옛 이미지). 지우지 않는다."""
+
+    page = fields.ForeignKeyField("models.DetailPage", related_name="exports", on_delete=fields.CASCADE)
+    platform = fields.CharEnumField(ExportPlatform, max_length=20)
+    version = fields.IntField()                                        # 판매처별 1, 2, 3 …
+    content_hash = fields.CharField(max_length=64)                     # sha256 hex
+    template = fields.CharField(max_length=50, default="")             # FE 템플릿 버전 (DETAIL_TEMPLATE_VERSION)
+    files = fields.JSONField()                                         # [{url, width, height, size, sha256}] 순서대로
+    created_by = fields.ForeignKeyField(
+        "models.User", related_name="detail_page_exports", null=True, on_delete=fields.SET_NULL
+    )
+
+    class Meta:
+        table = "detail_page_export"
+        unique_together = (("page", "platform", "version"),)
 
 
 class DetailPageCommon(BaseModel):
