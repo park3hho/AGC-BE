@@ -1,7 +1,7 @@
 """위안 환율 — 가격 책정 · 배송비가 같이 쓰는 하나의 값.
 
 하루 1건 (`exchange_rate.date` unique, KST 날짜). "현재 환율" = 날짜 최근 행. 한 건도 없으면 DEFAULT_FX_RATE (200).
-- 자동: 서버가 켜질 때 + 매시간 하나은행 고시(안 되면 open.er-api)를 받아 오늘 값을 갱신 (fx_auto_loop).
+- 자동: 매일 오전 9시(KST) 하나은행 고시(안 되면 open.er-api)를 받아 오늘 값으로 저장 (fx_auto_loop).
 - 직접 입력: 환율 설정 화면. 그날은 자동으로 덮어쓰지 않는다 ('지금 받아오기'를 누르면 바뀜).
 - 저장할 때마다 exchange_rate_log 에 한 줄씩 남긴다 — 추이 그래프는 이 서버 기록만 쓴다 (외부 과거 데이터 안 받음).
 """
@@ -16,7 +16,10 @@ from tortoise.exceptions import IntegrityError
 
 from core.pricing_config import (
     DEFAULT_FX_RATE,
-    FX_AUTO_INTERVAL_SEC,
+    FX_DAILY_HOUR,
+    FX_DAILY_MINUTE,
+    FX_RETRY_MAX,
+    FX_RETRY_SEC,
     FX_HISTORY_SIZE,
     FX_TREND_DAILY_AFTER_DAYS,
     FX_TREND_MAX_DAYS,
@@ -126,18 +129,39 @@ class ExchangeRateService:
         }
 
 
-async def fx_auto_loop() -> None:
-    """서버가 켜지면 바로, 그 뒤 FX_AUTO_INTERVAL_SEC 마다 오늘 환율을 받는다 (main.py lifespan 에서 시작).
-    실패해도 멈추지 않는다 — 마지막 저장값으로 계속 계산되고 다음 차례에 다시 한다."""
-    while True:
+def _next_daily_run(now: datetime) -> datetime:
+    run = now.replace(hour=FX_DAILY_HOUR, minute=FX_DAILY_MINUTE, second=0, microsecond=0)
+    return run if run > now else run + timedelta(days=1)
+
+
+async def _refresh_with_retry() -> None:
+    """자동 받기 한 번 — 실패하면 FX_RETRY_SEC 뒤 다시, 최대 FX_RETRY_MAX 번. 그래도 안 되면 마지막 저장값으로 계속."""
+    for attempt in range(1, FX_RETRY_MAX + 1):
         try:
             r = await ExchangeRateService.refresh(force=False)
             logger.info(
                 f"환율 자동 받기: {r['fetched']['cny_krw']} ({r['fetched']['source']})"
                 + ("" if r["updated"] else " — 오늘 직접 입력값이 있어 저장 안 함")
             )
+            return
         except asyncio.CancelledError:
             raise
         except Exception as e:
-            logger.warning(f"환율 자동 받기 실패: {type(e).__name__}: {e}")
-        await asyncio.sleep(FX_AUTO_INTERVAL_SEC)
+            logger.warning(f"환율 자동 받기 실패 ({attempt}/{FX_RETRY_MAX}): {type(e).__name__}: {e}")
+            if attempt < FX_RETRY_MAX:
+                await asyncio.sleep(FX_RETRY_SEC)
+
+
+async def fx_auto_loop() -> None:
+    """매일 FX_DAILY_HOUR:FX_DAILY_MINUTE(KST, 오전 9시)에 오늘 환율을 한 번 받아 저장한다 (main.py lifespan 에서 시작).
+    서버가 켜질 때: 오늘 값이 아직 없고, 9시가 지났거나 저장된 환율이 하나도 없으면 바로 받는다
+    (9시 전에 켜지면 9시까지 어제 값을 쓴다). 주말·공휴일엔 직전 영업일 고시가 그대로 저장된다."""
+    now = datetime.now(KST)
+    if not await ExchangeRate.exists(date=now.date()):
+        past = (now.hour, now.minute) >= (FX_DAILY_HOUR, FX_DAILY_MINUTE)
+        if past or not await ExchangeRate.exists():
+            await _refresh_with_retry()
+    while True:
+        now = datetime.now(KST)
+        await asyncio.sleep((_next_daily_run(now) - now).total_seconds())
+        await _refresh_with_retry()

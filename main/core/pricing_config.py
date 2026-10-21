@@ -36,7 +36,11 @@ FX_OPEN_ER_URL = "https://open.er-api.com/v6/latest/CNY"
 FX_TREND_MAX_DAYS = 400
 FX_TREND_DAILY_AFTER_DAYS = 31  # 이보다 긴 기간은 하루 마지막 값 하나씩 (매시간 기록이라 1년이면 8천 줄)
 FX_FETCH_TIMEOUT_SEC = 10
-FX_AUTO_INTERVAL_SEC = 3600      # 매시간 오늘 환율을 다시 받는다 (서버가 켜질 때도 한 번)
+# 매일 이 시각(KST)에 오늘 환율을 한 번 받는다 — 하나은행 1회차 고시가 8시 25분쯤 나온다 (2026-10-21 확인)
+FX_DAILY_HOUR = 9
+FX_DAILY_MINUTE = 0
+FX_RETRY_SEC = 600               # 못 받으면 10분 뒤 다시
+FX_RETRY_MAX = 6                 # 최대 6번 (1시간) — 그래도 안 되면 다음 날, 그동안은 마지막 저장값
 FX_SANE_MIN = 100               # 이 범위를 벗어난 값은 잘못 받은 것으로 보고 버린다 (원/위안)
 FX_SANE_MAX = 400
 
