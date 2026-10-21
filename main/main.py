@@ -15,6 +15,7 @@ from services.pricing.exchange_rate_service import fx_auto_loop
 from routers import (
     auth,
     company_account,
+    detail_page,
     exchange_rate,
     health,
     price_survey,
@@ -66,6 +67,7 @@ app.include_router(company_account.router)
 app.include_router(product.router)
 app.include_router(price_survey.router)
 app.include_router(pricing.router)
+app.include_router(detail_page.router)
 app.include_router(exchange_rate.router)
 app.include_router(shipping.router)
 app.include_router(upload.router)

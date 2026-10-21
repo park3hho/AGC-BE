@@ -12,9 +12,11 @@ TORTOISE_ORM = {
                 "models.product.product",
                 "models.product.price_survey",
                 "models.product.pricing",       # 판매처별 가격 설정 · 옵션 판매가 · 환율 캐시
+                "models.product.detail_page",   # 상세페이지(디자인) · 검수 기록 · S6 공통 안내
                 # user — 로그인 계정 · company_account — 회사 외부 서비스 계정 + 비밀번호 열람 기록
                 "models.user.user",
                 "models.company_account.company_account",
+                "models.company_account.api_credential",   # API 키 묶음 · 비밀값 · 열람 기록
                 "aerich.models",
             ],
             "default_connection": "default",

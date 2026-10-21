@@ -220,8 +220,10 @@ async def lifespan(app: FastAPI):
 
 | Role | Feature |
 |---|---|
-| `admin` | `research` · `account_view` · `account_edit` · `user_manage` |
-| `member` | `research` · `account_view` |
+| `admin` | `research` · `account_view` · `account_edit` · `user_manage` · `detail_review` |
+| `member` | `research` · `account_view` · `detail_review` |
+
+- `detail_review` (2026-10-21) = 상세페이지 휴먼 체크 (승인 · 수정 요청 · 공통 안내 저장). `API_KEY_FEATURES` 에 없으므로 **API 키(리서처 등 자동화)로는 승인할 수 없다** — 사람이 로그인해서만. 초안 작성·저장·검수 요청은 `research`.
 
 - role 은 **DB 우선** 조회 → 관리자가 권한을 내리면 다음 요청부터 즉시 반영.
 - 사용자 관리 규칙: 자기 자신 비활성화·자기 역할 변경 금지, 마지막 활성 관리자는 비활성화·강등 금지. 비밀번호를 바꾸면 `session_version` +1 → 그 사용자의 기존 세션 모두 401.
@@ -367,6 +369,39 @@ exchange_rate (날짜별 위안 환율, 독립 — 최근 행 = 현재 환율)
   `차익 = sale_price − 원가+배송 − sale_price × (platform_fee_rate + payment_fee_rate)/100`, `마진율 = 차익 / sale_price`.
 - 네이버 추가금은 저장하지 않고 등록할 때 계산한다: 대표가 = `base_option` 의 판매가 (없으면 자동 선택), 추가금 = 옵션 판매가 − 대표가 (마이너스 가능).
   한도: 대표가 1만 원 이상 −50%~+50%, 2천~1만 원 −50%~+100%, 2천 원 미만 0~+100% (2026-10-20 확인).
+
+### 6.4 상세페이지 (디자인) · 휴먼 체크 (2026-10-21)
+
+```
+product 1 ── 0..1 detail_page 1 ──< N detail_page_review (검수 기록)
+detail_page_common (행 1개, id=1 — S6 해외구매대행 안내 + 등록번호, 모든 페이지가 같이 씀)
+```
+
+템플릿 = S1 대표 사진 · S2 포인트 · S3 맛 선택 · S4 제품 정보 · S5 마시는 법·보관 · S6 해외구매대행 안내(공통), 폭 860px (기준: 루트 `detail-page-mockup.pdf`, 2026-10-21 사용자 승인한 구조). S1~S5 칸 값은 `detail_page.content`, S6 는 `detail_page_common` 한 곳에서만 고친다.
+
+**`detail_page`** (`models/product/detail_page.py`)
+| 컨럼 | 타입 | 필수 | 뜻 |
+|---|---|---|---|
+| `product_id` | FK → product, unique (CASCADE) | ✅ | 제품 1 : 상세페이지 1 |
+| `content` | jsonb | ✅ | 템플릿 칸 값 — 모양은 `schemas/detail_page.DetailContent` (모르는 키는 버리고 빠진 칸은 빈 값) |
+| `status` | varchar(20) | ✅ | `draft` 초안 → `review` 검수 대기 → `approved` 승인 / `changes` 수정 필요 (`core/detail_page_config.DetailStatus`) |
+| `updated_by_id` | FK → app_user (SET NULL) | | 마지막으로 내용을 바꾼 사람 |
+| `reviewed_by_id` · `reviewed_at` · `review_note` | FK · timestamptz · text | | 마지막 검수 (승인 또는 수정 요청) — 누가 · 언제 · 메모 |
+| `review_checks` | jsonb | | 승인 때 체크한 휴먼 체크 항목 키 |
+
+**`detail_page_review`** — `action`(`submit` 검수 요청 · `approve` · `changes` · `reset` 자동 되돌림), `user_id`, `note`, `checks`, `created_at`. 지우지 않는다.
+
+**`detail_page_common`** — `reg_no`(수입식품등 인터넷 구매대행업 등록번호) · `seller` · `notice_title` · `notice`(jsonb `[{title, body}]`). 행이 없으면 `DEFAULT_COMMON` 으로 만든다.
+
+**규칙**
+- 목록 대상 = **가격 책정 완료** 제품 (모든 판매처 판매가 저장 — FE `pricingStatusOf` 의 `done`).
+- 템플릿 채우기 (`build_template`): 제품 이름 · 최근 가격 조사의 옵션(option1 = 맛, option2 = 용량·입수) · 옵션별 사진으로 칸을 채우고, 사람이 써야 하는 칸은 `[[...]]` **확인 표시**로 남긴다. 페이지가 없으면 GET 이 템플릿만 주고(저장 안 함), 첫 PUT 이 초안으로 만든다.
+- **확인 표시 `[[...]]`** (`MARKER_RE`): 미리보기에 노란 표시로 보이고, content 나 공통 안내에 하나라도 남아 있으면 승인할 수 없다 (가안 문구는 `[[가안]]`).
+- **승인 조건** (전부 BE 가 다시 확인): 상태 `review` · 휴먼 체크 5항목(`REVIEW_CHECKS`: 등록번호 · 원재료 라벨 대조 · 사진 속 중국 현지 프로모 · 효능·과장 표현 · 가안 문구) 전부 · 등록번호가 비거나 `0000-0000000` 같은 자리표시가 아님 · 확인 표시 0개 · 사람 로그인(`detail_review`, API 키 불가).
+- **승인 = 지금 보이는 그대로를 사람이 확인함.** 승인 뒤 content 가 바뀌면 그 페이지는 검수 대기로, 공통 안내가 바뀌면 승인된 페이지 전부 검수 대기로 돌아간다 (`reset` 기록).
+- 수정 요청은 메모 필수, `review` · `approved` 에서만. 수정 필요는 고친 뒤 다시 검수 요청(`submit`)해야 검수 대기가 된다.
+- **상품 등록(다음 단계)은 `approved` 상세페이지만 받는다.** 등록 직전에 상태를 다시 읽어 확인한다 (등록 중 내용이 바뀌면 검수 대기가 되므로).
+- 이미지(PNG)는 BE 가 만들지 않는다 — FE 가 같은 템플릿을 860px 로 그려 내려받는다 (FE DESIGN §4.7).
 
 ---
 
