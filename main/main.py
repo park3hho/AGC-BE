@@ -13,6 +13,7 @@ from core.response_utils import success
 from database import TORTOISE_ORM
 from services.pricing.exchange_rate_service import fx_auto_loop
 from routers import (
+    api_credential,
     auth,
     company_account,
     detail_page,
@@ -64,6 +65,7 @@ app.include_router(health.router)
 app.include_router(auth.router)
 app.include_router(users.router)
 app.include_router(company_account.router)
+app.include_router(api_credential.router)
 app.include_router(product.router)
 app.include_router(price_survey.router)
 app.include_router(pricing.router)
