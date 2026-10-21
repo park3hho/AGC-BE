@@ -327,6 +327,7 @@ app_user 1 ──< N company_account_password_view >── 1 company_account
 ```
 product 1 ──< N product_pricing (판매처별 1개) 1 ──< N option_price >── 1 price_survey_option
 exchange_rate (날짜별 위안 환율, 독립 — 최근 행 = 현재 환율)
+exchange_rate_log (저장할 때마다 한 줄 — 추이 그래프, 독립)
 ```
 
 **`product_pricing` — 판매처별 가격 설정** (`models/product/pricing.py`, unique `product + platform`)
@@ -356,6 +357,11 @@ exchange_rate (날짜별 위안 환율, 독립 — 최근 행 = 현재 환율)
   - 둘 다 실패하면 로그만 남기고 마지막 저장값으로 계속 계산한다 (다음 차례에 다시).
   - 한국수출입은행 공식 API 는 인증키가 필요해 쓰지 않는다 (필요하면 `.env` 키 + 출처 추가).
 - **직접 입력** (`PUT /exchange-rate`, `source = manual`)은 그날 자동으로 덮어쓰지 않는다. 화면의 '지금 받아오기'(`POST /exchange-rate/refresh`)는 직접 입력값도 바꾼다.
+
+**`exchange_rate_log` — 환율 기록** (`cny_krw`, `source`, `observed_at`(출처 기준 시각, 문자열), `created_at` = 저장 시각) — 마이그레이션 11, 2026-10-21
+- `exchange_rate` 에 저장할 때마다(`_upsert_today`) 한 줄 추가 — 자동(매시간) · 지금 받아오기 · 직접 입력. 직접 입력 때문에 자동 저장을 건너뛴 때는 안 남는다.
+- 추이 그래프(`GET /exchange-rate?days=`)는 **이 서버 기록만** 쓴다 — 외부 과거 데이터를 채우지 않는다 (사용자 결정 2026-10-21). `FX_TREND_DAILY_AFTER_DAYS`(31)일보다 긴 기간은 하루 마지막 값 하나씩.
+- 계산에는 쓰지 않는다 (기록용). 지우지 않음 — 매시간 1줄, 1년 약 8,800줄.
 
 **배송비 — 저장하지 않고 계산** (`core/shipping_config.py`, `services/pricing/shipping_service.py`, 2026-10-20)
 - 요금: 타오바오 공식 집운-해운 한국행 **식품·민감 화물** 고정 — 첫 1kg 33위안, 넘는 무게 0.5kg 마다 2위안 (0.5kg 단위 올림), 소형 한도 30kg.

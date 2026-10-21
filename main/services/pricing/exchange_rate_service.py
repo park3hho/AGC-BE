@@ -3,21 +3,31 @@
 하루 1건 (`exchange_rate.date` unique, KST 날짜). "현재 환율" = 날짜 최근 행. 한 건도 없으면 DEFAULT_FX_RATE (200).
 - 자동: 서버가 켜질 때 + 매시간 하나은행 고시(안 되면 open.er-api)를 받아 오늘 값을 갱신 (fx_auto_loop).
 - 직접 입력: 환율 설정 화면. 그날은 자동으로 덮어쓰지 않는다 ('지금 받아오기'를 누르면 바뀜).
+- 저장할 때마다 exchange_rate_log 에 한 줄씩 남긴다 — 추이 그래프는 이 서버 기록만 쓴다 (외부 과거 데이터 안 받음).
 """
 
 import asyncio
 import logging
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from typing import Optional
 
 from tortoise.exceptions import IntegrityError
 
-from core.pricing_config import DEFAULT_FX_RATE, FX_AUTO_INTERVAL_SEC, FX_HISTORY_SIZE, FxSource
-from models.product.pricing import ExchangeRate
+from core.pricing_config import (
+    DEFAULT_FX_RATE,
+    FX_AUTO_INTERVAL_SEC,
+    FX_HISTORY_SIZE,
+    FX_TREND_DAILY_AFTER_DAYS,
+    FX_TREND_MAX_DAYS,
+    FxSource,
+)
+from models.product.pricing import ExchangeRate, ExchangeRateLog
 from services.pricing.fx_fetch import fetch_cny_krw
 from utils.code_gen import today_kst
 
 logger = logging.getLogger(__name__)
+KST = timezone(timedelta(hours=9))
 
 
 def fx_str(v) -> str:
@@ -48,15 +58,32 @@ class ExchangeRateService:
         return Decimal((await ExchangeRateService.current())["cny_krw"])
 
     @staticmethod
-    async def overview() -> dict:
+    async def overview(days: Optional[int] = None) -> dict:
+        """현재 환율 + 날짜별 기록(최근 FX_HISTORY_SIZE 일).
+        days 를 주면 trend 도 준다 — 최근 days 일 동안 서버가 저장한 기록 (exchange_rate_log, 오래된 → 최근).
+        FX_TREND_DAILY_AFTER_DAYS 일보다 길면 하루 마지막 값 하나씩으로 줄인다."""
         rows = await ExchangeRate.all().order_by("-date", "-id").limit(FX_HISTORY_SIZE)
-        return {
+        out = {
             "current": _rate_dict(rows[0] if rows else None),
             "history": [_rate_dict(r) for r in rows],
         }
-
+        if days:
+            days = min(days, FX_TREND_MAX_DAYS)
+            since = datetime.now(timezone.utc) - timedelta(days=days)
+            logs = await ExchangeRateLog.filter(created_at__gte=since).order_by("created_at", "id")
+            if days > FX_TREND_DAILY_AFTER_DAYS:
+                last_of_day = {}
+                for log in logs:
+                    last_of_day[log.created_at.astimezone(KST).date()] = log
+                logs = list(last_of_day.values())
+            out["trend"] = [
+                {"at": log.created_at.isoformat(), "cny_krw": fx_str(log.cny_krw), "source": log.source}
+                for log in logs
+            ]
+        return out
     @staticmethod
-    async def _upsert_today(cny_krw: Decimal, source: FxSource) -> None:
+    async def _upsert_today(cny_krw: Decimal, source: FxSource, observed_at: Optional[str] = None) -> None:
+        await ExchangeRateLog.create(cny_krw=cny_krw, source=source.value, observed_at=observed_at)
         day = today_kst()
         for _ in range(2):
             row = await ExchangeRate.get_or_none(date=day)
@@ -86,7 +113,9 @@ class ExchangeRateService:
         today = await ExchangeRate.get_or_none(date=today_kst())
         updated = force or not (today and today.source == FxSource.MANUAL.value)
         if updated:
-            await ExchangeRateService._upsert_today(fetched["cny_krw"], FxSource(fetched["source"]))
+            await ExchangeRateService._upsert_today(
+                fetched["cny_krw"], FxSource(fetched["source"]), str(fetched["observed_at"] or "")[:40] or None
+            )
         return {
             "updated": updated,          # False = 오늘 직접 입력한 값이 있어 그대로 둠
             "fetched": {

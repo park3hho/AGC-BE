@@ -1,6 +1,6 @@
 import logging
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 
 from core.auth_deps import require_feature
 from core.permissions import Feature
@@ -14,9 +14,12 @@ router = APIRouter(prefix="/exchange-rate", tags=["ExchangeRate"])
 
 
 @router.get("")
-async def get_exchange_rate(auth=Depends(require_feature(Feature.RESEARCH))):
+async def get_exchange_rate(
+    days: int | None = Query(default=None, ge=1, le=400),   # 주면 trend(최근 days 일 서버 기록) 도 준다
+    auth=Depends(require_feature(Feature.RESEARCH)),
+):
     try:
-        return success(**await ExchangeRateService.overview())
+        return success(**await ExchangeRateService.overview(days))
     except HTTPException:
         raise
     except Exception as e:

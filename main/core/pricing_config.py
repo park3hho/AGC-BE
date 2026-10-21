@@ -32,6 +32,9 @@ class FxSource(str, Enum):
 #   한국수출입은행 공식 API 는 인증키가 필요해서 쓰지 않음
 FX_HANA_URL = "https://m.stock.naver.com/front-api/marketIndex/productDetail?category=exchange&reutersCode=FX_CNYKRW"
 FX_OPEN_ER_URL = "https://open.er-api.com/v6/latest/CNY"
+# 추이 그래프 — GET /exchange-rate?days= 최대 (서버가 저장한 기록 exchange_rate_log)
+FX_TREND_MAX_DAYS = 400
+FX_TREND_DAILY_AFTER_DAYS = 31  # 이보다 긴 기간은 하루 마지막 값 하나씩 (매시간 기록이라 1년이면 8천 줄)
 FX_FETCH_TIMEOUT_SEC = 10
 FX_AUTO_INTERVAL_SEC = 3600      # 매시간 오늘 환율을 다시 받는다 (서버가 켜질 때도 한 번)
 FX_SANE_MIN = 100               # 이 범위를 벗어난 값은 잘못 받은 것으로 보고 버린다 (원/위안)

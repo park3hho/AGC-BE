@@ -58,3 +58,15 @@ class ExchangeRate(BaseModel):
 
     class Meta:
         table = "exchange_rate"
+
+
+class ExchangeRateLog(BaseModel):
+    """서버가 저장한 환율 기록 — 매시간 자동 · 지금 받아오기 · 직접 입력마다 한 줄씩 쌓는다 (추이 그래프).
+    저장 시각 = created_at. 계산에 쓰는 값은 exchange_rate(하루 1건)이고, 이 표는 기록만."""
+
+    cny_krw = fields.DecimalField(max_digits=12, decimal_places=4)
+    source = fields.CharField(max_length=50)                                    # hana · open_er_api · manual
+    observed_at = fields.CharField(max_length=40, null=True)                    # 출처가 알려준 기준 시각 (문자열 그대로)
+
+    class Meta:
+        table = "exchange_rate_log"
