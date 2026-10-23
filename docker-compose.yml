@@ -10,10 +10,12 @@ services:
     volumes:
       - ./main:/app            # dev — 코드 수정이 --reload 로 바로 반영
       - ./uploads:/uploads     # 업로드 사진 — 이 PC 디스크 (BE/uploads). /app 밖이라 코드 폴더와 안 섞인다
+      - ./private:/private     # 회사 서류 — 공개(/files) 아님, API 가 권한 확인 후 내려준다
     env_file:
       - .env
     environment:
       - TZ=Asia/Seoul
+      - PRIVATE_DIR=/private
     # --proxy-headers: nginx 가 넘긴 X-Forwarded-For 로 실제 접속 IP 를 본다 (8000 은 이 PC 에서만 열려 있어 위조 불가)
     command: uvicorn main:app --host 0.0.0.0 --port 8000 --reload --proxy-headers --forwarded-allow-ips=*
     depends_on:
@@ -51,6 +53,7 @@ services:
     environment:
       - DOMAIN=${BE_DOMAIN:-}
       - TZ=Asia/Seoul
+      - PRIVATE_DIR=/private
     volumes:
       - ./nginx:/etc/nginx/agc:ro
       - letsencrypt:/etc/letsencrypt:ro

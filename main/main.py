@@ -17,6 +17,7 @@ from routers import (
     shipping_address,
     auth,
     company_account,
+    company_info,
     detail_page,
     exchange_rate,
     health,
@@ -67,6 +68,7 @@ app.include_router(auth.router)
 app.include_router(users.router)
 app.include_router(company_account.router)
 app.include_router(api_credential.router)
+app.include_router(company_info.router)
 app.include_router(shipping_address.router)
 app.include_router(product.router)
 app.include_router(price_survey.router)

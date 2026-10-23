@@ -7,6 +7,7 @@ from fastapi import HTTPException
 from tortoise.exceptions import IntegrityError
 from tortoise.transactions import in_transaction
 
+from core.company_info_config import LINK_FOOD_AGENCY_REG_NO
 from core.detail_page_config import (
     DEFAULT_COMMON,
     MARKER_RE,
@@ -22,6 +23,7 @@ from models.product.price_survey import PriceSurveyOption
 from models.product.pricing import ProductPricing
 from models.product.product import Product
 from schemas.detail_page import DetailCommonSave, DetailContent, DetailPageApprove, DetailPageSave
+from services.company_account.company_info_service import linked_value
 from services.product import detail_export_service as exports
 from services.product.price_survey_service import alive_surveys
 from services.product.product_service import alive_products
@@ -54,14 +56,31 @@ def _common_payload(c: DetailPageCommon) -> dict:
     return {"reg_no": c.reg_no, "seller": c.seller, "notice_title": c.notice_title, "notice": c.notice}
 
 
-def _common_dict(c: DetailPageCommon) -> dict:
+def _common_dict(c: DetailPageCommon, reg_no_linked: bool = False) -> dict:
     payload = _common_payload(c)
     return {
         **payload,
         "reg_no_ready": reg_no_ready(c.reg_no),
+        "reg_no_linked": reg_no_linked,     # true = 회사 정보 › 기본 정보에서 가져온 값 (S6 에서는 못 고침)
         "marker_count": count_markers({k: v for k, v in payload.items() if k != "reg_no"}),
         "updated_at": c.updated_at.isoformat(),
     }
+
+
+async def _apply_common(data: dict, user_id: int, reason: str) -> int:
+    """공통 안내를 data 로 바꾼다. 실제로 바뀌었으면 승인된 상세페이지를 모두 검수 대기로 되돌리고 그 수를 준다."""
+    await _get_common()
+    async with in_transaction() as conn:
+        c = await DetailPageCommon.filter(id=COMMON_ID).using_db(conn).select_for_update().first()
+        if _common_payload(c) == data:
+            return 0
+        await c.update_from_dict({**data, "updated_by_id": user_id}).save(using_db=conn)
+        approved = await DetailPage.filter(status=DetailStatus.APPROVED).using_db(conn)
+        for dp in approved:
+            dp.status = DetailStatus.REVIEW
+            await dp.save(using_db=conn, update_fields=["status", "updated_at"])
+            await _log(dp.id, ReviewAction.RESET, user_id, reason, conn=conn)
+        return len(approved)
 
 
 async def _get_common() -> DetailPageCommon:
@@ -276,7 +295,7 @@ class DetailPageService:
             "page": await _page_dict(dp) if dp else None,
             "template": template,          # 페이지가 없을 때 처음 채울 값 (저장하지 않은 상태)
             "photos": _photos(p, options),
-            "common": _common_dict(common),
+            "common": _common_dict(common, reg_no_linked=await linked_value(LINK_FOOD_AGENCY_REG_NO) is not None),
         }
 
     @staticmethod
@@ -362,22 +381,30 @@ class DetailPageService:
 
     @staticmethod
     async def get_common() -> dict:
-        return _common_dict(await _get_common())
+        linked = await linked_value(LINK_FOOD_AGENCY_REG_NO)
+        return _common_dict(await _get_common(), reg_no_linked=linked is not None)
 
     @staticmethod
     async def save_common(body: DetailCommonSave, user_id: int) -> dict:
-        """공통 안내 저장. 바뀌었으면 승인된 상세페이지를 모두 검수 대기로 되돌린다 (승인 = 지금 보이는 그대로 확인)."""
-        await _get_common()
+        """공통 안내 저장. 바뀌었으면 승인된 상세페이지를 모두 검수 대기로 되돌린다 (승인 = 지금 보이는 그대로 확인).
+        등록번호가 회사 정보 › 기본 정보에 연결돼 있으면 보낸 reg_no 대신 그 값을 쓴다."""
         data = body.model_dump()
-        reset = 0
-        async with in_transaction() as conn:
-            c = await DetailPageCommon.filter(id=COMMON_ID).using_db(conn).select_for_update().first()
-            if _common_payload(c) != data:
-                await c.update_from_dict({**data, "updated_by_id": user_id}).save(using_db=conn)
-                approved = await DetailPage.filter(status=DetailStatus.APPROVED).using_db(conn)
-                for dp in approved:
-                    dp.status = DetailStatus.REVIEW
-                    await dp.save(using_db=conn, update_fields=["status", "updated_at"])
-                    await _log(dp.id, ReviewAction.RESET, user_id, "공통 안내가 바뀌어 다시 검수해요", conn=conn)
-                reset = len(approved)
-        return {"common": _common_dict(await DetailPageCommon.get(id=COMMON_ID)), "reset_count": reset}
+        linked = await linked_value(LINK_FOOD_AGENCY_REG_NO)
+        if linked is not None:
+            data["reg_no"] = linked
+        reset = await _apply_common(data, user_id, "공통 안내가 바뀌어 다시 검수해요")
+        return {
+            "common": _common_dict(await DetailPageCommon.get(id=COMMON_ID), reg_no_linked=linked is not None),
+            "reset_count": reset,
+        }
+
+    @staticmethod
+    async def sync_linked_reg_no(user_id: int) -> int:
+        """회사 정보 › 기본 정보의 영업등록번호가 바뀌면 부른다. S6 등록번호를 맞추고 되돌린 상세페이지 수를 준다."""
+        linked = await linked_value(LINK_FOOD_AGENCY_REG_NO)
+        if linked is None:
+            return 0
+        c = await _get_common()
+        return await _apply_common(
+            {**_common_payload(c), "reg_no": linked}, user_id, "등록번호(회사 정보)가 바뀌어 다시 검수해요"
+        )

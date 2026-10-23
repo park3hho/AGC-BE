@@ -62,3 +62,7 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 # 업로드 파일 — 이 PC 디스크. compose 가 ./uploads 를 /uploads 로 연결한다 (컨테이너를 지워도 남는다)
 UPLOAD_DIR = Path(os.getenv("UPLOAD_DIR", str(BASE_DIR / "uploads")))
 UPLOAD_URL_PREFIX = "/files"      # 저장된 파일은 이 주소 아래로 내려준다 (main.py StaticFiles)
+
+# 공개하면 안 되는 파일 (회사 서류 — 주민번호·계좌가 들어 있음). /files 로 내려주지 않고 API 가 권한 확인 후 내려준다.
+# compose 가 ./private 를 /private 로 연결한다 (BE/private, 커밋 금지)
+PRIVATE_DIR = Path(os.getenv("PRIVATE_DIR", str(BASE_DIR.parent / "private")))

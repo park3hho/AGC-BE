@@ -322,6 +322,27 @@ app_user 1 ──< N company_account_password_view >── 1 company_account
 | `ip` | varchar(64) | | 요청 IP |
 | `created_at` | timestamptz | ✅ | 언제 |
 
+**회사 정보 = 기본 정보 · 로그인 계정 · API 키** (2026-10-23). 세 개념은 만료일 유무가 아니라 **무엇인지**로 나눈다:
+로그인 계정 = 아이디·비밀번호로 들어가는 것, API 키 = 비밀값(열람 기록)·재인증·허용 IP 가 있는 키, 기본 정보 = 그 밖의 회사 정보 전부 (번호·계좌·연락처·서류, 값은 숨기지 않음).
+
+**`company_info` — 기본 정보 1건** (`models/company_account/company_info.py`)
+| 컨럼 | 타입 | 필수 | 뜻 |
+|---|---|---|---|
+| `category` | varchar(30) | ✅ | 분류 — 자유 입력 (사업자 · 인허가·신고 · 계좌 · 연락처 · 서류) |
+| `name` | varchar(100) | ✅ | 이름 |
+| `value` | varchar(500) | | 대표 값. 서류처럼 파일만 있으면 비움 |
+| `details` | jsonb | ✅ | 세부 값 `[{label, value}]` |
+| `issuer` · `issued_on` · `expires_on` | | | 발급기관 · 발급일 · 만료일 |
+| `remind` | bool | ✅ | 만료 임박 시 홈 할 일에 띄움 (납세증명서처럼 다시 떼는 서류는 false) |
+| `url` | varchar(500) | | 관련 사이트 |
+| `link` | varchar(50) | | 앱에서 쓰는 곳 (`core/company_info_config.INFO_LINKS`). 살아 있는 항목 중 하나에만 (서비스에서 409) |
+| `sort` | smallint | ✅ | 분류 안 순서 |
+| `deleted_at` | timestamptz | | 소프트 삭제 |
+
+**`company_info_file` — 기본 정보에 붙인 서류** — `PRIVATE_DIR/company_info/YYYY/{임의}.{pdf|jpg|png|webp}` 에 저장. **`/files` (공개 StaticFiles) 로 내리지 않고** `GET /company-info/{id}/files/{file_id}` 가 `account_view` 확인 후 내려준다 (주민번호·계좌가 든 서류). 형식은 앞부분 바이트로 판단, 20MB, 항목당 10개.
+
+- **상세페이지 등록번호 연결**: `link = food_agency_reg_no` 항목이 있으면 `detail_page_common.reg_no` 는 그 값을 따른다. 항목을 추가·수정하면 `DetailPageService.sync_linked_reg_no` 가 값을 맞추고(바뀌면 승인된 상세페이지는 검수 대기로), `PUT /detail-pages/common` 은 보낸 `reg_no` 대신 연결 값을 쓴다. 연결 항목을 지우면 마지막 값이 남고 S6 에서 다시 고칠 수 있다.
+
 ### 6.3 가격 책정 (2026-10-19)
 
 ```
@@ -511,3 +532,4 @@ docker compose logs -f app
   - 80 포트를 못 열면 DNS 챌린지(`--preferred-challenges dns`)로 발급
   - 인증서는 90일 만료 → `certbot` 컨테이너가 자동 갱신 (§7.1)
 - [x] 파일 저장소 → 이 PC 디스크 `BE/uploads/` (compose 가 `/uploads` 로 연결, `POST /uploads/photos` · `GET /files/...`). 정기 백업 대상에 포함
+- [x] 비공개 파일 → `BE/private/` (compose 가 `/private` 로 연결, env `PRIVATE_DIR`). 회사 서류처럼 공개 주소로 내리면 안 되는 파일. API 가 권한 확인 후 내려준다. 커밋 금지, 정기 백업 대상
