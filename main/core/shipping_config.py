@@ -27,3 +27,20 @@ SHIPPING_MAX_KG = Decimal("30")        # 소형 한도 (kg)
 
 BOX_WEIGHT_G = 500                     # 박스 무게 (g)
 G_PER_ML = 1                           # 음료 1ml = 1g 으로 본다
+
+
+# ── 배송 경로 (출고지 주소의 route) ─────────────────────────────────────────────
+# 해외 배대지 → 해운/항공 → 한국 통관 → 국내 택배. 마켓 발송처리(송장 업로드)는 국내 택배사 + 국내 송장번호.
+# 택배사 코드 — 쿠팡 Open API '택배사 코드' · 네이버 커머스API '발송 처리' deliveryCompanyCode (확인일 2026-10-24)
+#   https://developers-v1.coupangcorp.com/hc/ko/articles/360034156033
+#   https://apicenter.commerce.naver.com/docs/commerce-api/2.80.0/seller-dispatch-product-orders-pay-order-seller
+# 롯데택배는 두 마켓 모두 옛 이름 코드 HYUNDAI 를 쓴다.
+COURIERS = {
+    "CJGLS": {"name": "CJ대한통운", "codes": {"쿠팡": "CJGLS", "네이버": "CJGLS"}},
+    "HANJIN": {"name": "한진택배", "codes": {"쿠팡": "HANJIN", "네이버": "HANJIN"}},
+    "LOTTE": {"name": "롯데택배", "codes": {"쿠팡": "HYUNDAI", "네이버": "HYUNDAI"}},
+    "EPOST": {"name": "우체국택배", "codes": {"쿠팡": "EPOST", "네이버": "EPOST"}},
+    "KGB": {"name": "로젠택배", "codes": {"쿠팡": "KGB", "네이버": "KGB"}},
+}
+
+TRANSPORTS = {"sea": "해운", "air": "항공"}

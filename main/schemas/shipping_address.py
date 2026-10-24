@@ -3,6 +3,7 @@ from typing import Literal, Optional
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
+from core.shipping_config import COURIERS
 from schemas.company_account import _required_text
 
 Use = Literal["outbound", "return"]       # 출고지 · 반품(교환)지
@@ -30,6 +31,32 @@ class MarketCodeIn(BaseModel):
 
 def _opt(v: Optional[str]) -> Optional[str]:
     return (v or "").strip() or None
+
+
+class RouteIn(BaseModel):
+    """배송 경로 — 해외 배대지 → 해운/항공 → 한국 통관 → 국내 택배. 마켓 발송처리는 courier(국내 택배사) + 국내 송장번호."""
+
+    forwarder: Optional[str] = Field(default=None, max_length=100)      # 국제 물류사 (예: 차이냐오 菜鸟)
+    transport: Literal["sea", "air"] = "sea"                           # 해운 · 항공
+    port: Optional[str] = Field(default=None, max_length=50)            # 입항 항구 (인천 · 평택)
+    courier: Optional[str] = None                                       # 국내 택배사 — core.shipping_config.COURIERS 키
+    tracking_when: Optional[str] = Field(default=None, max_length=200)  # 국내 송장번호가 나오는 시점
+    customs_ref: Optional[str] = Field(default=None, max_length=200)    # UNI-PASS 통관 조회 번호와 확인 위치
+    confirmed: bool = False                                             # 배대지(집운)에 확인했는지
+    note: Optional[str] = Field(default=None, max_length=2000)
+
+    @field_validator("forwarder", "port", "tracking_when", "customs_ref", "note")
+    @classmethod
+    def empty_none(cls, v):
+        return _opt(v)
+
+    @field_validator("courier")
+    @classmethod
+    def known_courier(cls, v):
+        v = _opt(v)
+        if v is not None and v not in COURIERS:
+            raise ValueError("모르는 택배사예요.")
+        return v
 
 
 class _AddressFields(BaseModel):
@@ -87,6 +114,7 @@ class ShippingAddressCreate(_AddressFields):
     uses: list[Use] = Field(min_length=1)
     defaults: list[Use] = []
     market_codes: list[MarketCodeIn] = Field(default=[], max_length=CODES_MAX)
+    route: Optional[RouteIn] = None
     memo: Optional[str] = Field(default=None, max_length=2000)
 
 
@@ -102,4 +130,5 @@ class ShippingAddressUpdate(_AddressFields):
     uses: Optional[list[Use]] = Field(default=None, min_length=1)
     defaults: Optional[list[Use]] = None
     market_codes: Optional[list[MarketCodeIn]] = Field(default=None, max_length=CODES_MAX)
+    route: Optional[RouteIn] = None                                     # null = 지움
     memo: Optional[str] = Field(default=None, max_length=2000)

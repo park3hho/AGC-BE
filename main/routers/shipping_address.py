@@ -6,7 +6,7 @@ from core.auth_deps import require_feature
 from core.permissions import Feature
 from core.response_utils import success, success_only
 from schemas.shipping_address import ShippingAddressCreate, ShippingAddressUpdate
-from services.shipping.address_service import ShippingAddressService
+from services.shipping.address_service import ShippingAddressService, courier_list
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/shipping-addresses", tags=["ShippingAddress"])
@@ -22,7 +22,7 @@ def _fail(what: str, e: Exception):
 @router.get("")
 async def list_addresses(auth=Depends(require_feature(Feature.RESEARCH))):
     try:
-        return success(items=await ShippingAddressService.list())
+        return success(items=await ShippingAddressService.list(), couriers=courier_list())
     except HTTPException:
         raise
     except Exception as e:

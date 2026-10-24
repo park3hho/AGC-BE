@@ -16,6 +16,7 @@ class ShippingAddress(BaseModel):
     uses = fields.JSONField(default=list)                         # 용도 ["outbound", "return"] — 출고지 · 반품(교환)지
     defaults = fields.JSONField(default=list)                     # 기본으로 쓰는 용도 (uses 의 부분집합, 용도마다 1곳만)
     market_codes = fields.JSONField(default=list)                 # [{market, use, code, name}] — 마켓 주소록 번호
+    route = fields.JSONField(null=True)                           # 배송 경로 (해외 출고지) — 물류사·항구·국내 택배사·송장 시점. schemas.RouteIn
     memo = fields.TextField(null=True)
     created_by = fields.ForeignKeyField(
         "models.User", related_name="created_shipping_addresses", null=True, on_delete=fields.SET_NULL

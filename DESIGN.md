@@ -391,6 +391,10 @@ exchange_rate_log (저장할 때마다 한 줄 — 추이 그래프, 독립)
 - 부피 무게 · 관세는 아직 반영하지 않는다.
 - 배송비 화면은 제품별 목록이 아니라 무게 구간별 요금표만 보여준다 (`GET /shipping-fees/rule`, 2026-10-20 사용자 결정). 옵션별 배송비는 가격 책정에서 본다.
 
+**출고지·반품지 주소록 · 배송 경로** (`models/shipping/address.py`, 마이그레이션 13 · 15)
+- `shipping_address` — 실제 장소 1곳 = 1행. `market_codes`(jsonb) 에 마켓 주소록 번호. 구매대행은 배대지(해외) 주소 하나를 출고지·반품지로 쓴다.
+- `route`(jsonb, null 가능, 2026-10-24) — 배송 경로: 국제 물류사 · 해운/항공 · 입항 항구 · **국내 택배사(`courier`, `core/shipping_config.COURIERS` 키)** · 국내 송장 나오는 시점 · UNI-PASS 조회 번호 · 확인 여부. 응답에 `courier_codes`(쿠팡·네이버 택배사 코드)를 붙여 주문 발송처리가 그대로 쓴다. 택배사 코드는 두 마켓 문서에서 확인한 값만 `COURIERS` 에 둔다.
+
 - **차익 · 마진율은 저장하지 않는다** — 계산값이라 따로 두면 어긋난다. 판매가만 저장하고, 화면을 열 때마다 현재 환율로 다시 계산한다.
   `실결제환율 = 현재 환율 × (1 + fx_markup_pct/100)`, `원가+배송 = (price_cny + shipping_cny) × 실결제환율`,
   `차익 = sale_price − 원가+배송 − sale_price × (platform_fee_rate + payment_fee_rate)/100`, `마진율 = 차익 / sale_price`.

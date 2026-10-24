@@ -4,17 +4,40 @@ from fastapi import HTTPException
 from pydantic import ValidationError
 from tortoise.transactions import in_transaction
 
+from core.shipping_config import COURIERS, TRANSPORTS
 from models.shipping.address import ShippingAddress
 from schemas.shipping_address import ShippingAddressCreate, ShippingAddressUpdate
 
-FIELDS = ("name", "country", "zip_code", "address", "address_detail", "phone", "uses", "defaults", "market_codes", "memo")
+FIELDS = (
+    "name", "country", "zip_code", "address", "address_detail", "phone", "uses", "defaults", "market_codes", "route",
+    "memo",
+)
 NOT_NULL = {"name", "country", "address", "uses", "defaults", "market_codes"}
+
+
+def courier_list() -> list[dict]:
+    """고를 수 있는 국내 택배사 — FE 선택지 · 마켓별 코드 (진실의 원천은 core.shipping_config)."""
+    return [{"key": k, "name": v["name"], "codes": v["codes"]} for k, v in COURIERS.items()]
+
+
+def _route_out(route: dict | None) -> dict | None:
+    """저장된 route + 택배사 이름 · 마켓별 택배사 코드(발송처리에 그대로 쓴다)."""
+    if not route:
+        return None
+    c = COURIERS.get(route.get("courier") or "")
+    return {
+        **route,
+        "transport_label": TRANSPORTS.get(route.get("transport"), route.get("transport")),
+        "courier_name": c["name"] if c else None,
+        "courier_codes": c["codes"] if c else {},
+    }
 
 
 def address_dict(a: ShippingAddress) -> dict:
     return {
         "id": a.id,
         **{f: getattr(a, f) for f in FIELDS},
+        "route": _route_out(a.route),
         "overseas": a.country != "KR",
         "created_at": a.created_at.isoformat(),
         "updated_at": a.updated_at.isoformat(),
