@@ -131,6 +131,27 @@ async def log_event(order, actor: dict, kind: str, summary: str, data: dict | No
     )
 
 
+# 마켓 원본 응답을 보여줄 때 가릴 키 (개인정보) — 상품명 같은 *Name 은 그대로 둔다
+PERSONAL_KEYS = {
+    "name", "ordererName", "ordererId", "ordererNo", "ordererTel", "tel1", "tel2", "safeNumber", "receiverNumber",
+    "ordererNumber", "ordererPhoneNumber", "email", "baseAddress", "detailedAddress", "addr1", "addr2",
+    "consigneePrimaryAddress", "individualCustomUniqueCode", "personalCustomsClearanceCode", "oneTimePccc",
+    "otpNumber", "orderersSsn", "ordererSsn", "pickupLocationContent", "entryMethodContent", "shippingMemo",
+    "parcelPrintMessage",
+}
+
+
+def mask_raw(v, key: str | None = None):
+    """원본 응답의 구조·필드는 그대로 두고 개인정보 값만 가린다."""
+    if isinstance(v, dict):
+        return {k: mask_raw(x, k) for k, x in v.items()}
+    if isinstance(v, list):
+        return [mask_raw(x, key) for x in v]
+    if key in PERSONAL_KEYS and isinstance(v, str) and v:
+        return v[0] + "*" * min(8, max(1, len(v) - 1)) if len(v) > 1 else "*"
+    return v
+
+
 def _fmt(v):
     return v.isoformat() if isinstance(v, datetime) else v
 
@@ -335,7 +356,8 @@ class OrderService:
         if not o:
             raise HTTPException(status_code=404, detail="주문을 찾지 못했습니다.")
         events = await OrderEvent.filter(order_id=o.id).order_by("-id").prefetch_related("actor_user")
-        return {"order": order_dict(o), "events": [event_dict(e) for e in events]}
+        raw = json.loads(_dec(o.raw_enc) or "null")
+        return {"order": order_dict(o), "events": [event_dict(e) for e in events], "raw_masked": mask_raw(raw)}
 
     @staticmethod
     async def recheck(order_id: int, auth: dict) -> dict:
