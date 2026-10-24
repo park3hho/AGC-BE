@@ -32,7 +32,7 @@ def _plain(v):
     if isinstance(v, Decimal):
         return f"{v:.2f}"
     if isinstance(v, datetime):
-        return v.isoformat()
+        return v.astimezone(timezone.utc).isoformat()   # 보낸 +09:00 과 저장된 UTC 를 같은 값으로 비교
     return v
 
 
