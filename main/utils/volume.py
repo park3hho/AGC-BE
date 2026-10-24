@@ -4,23 +4,31 @@
     parse_volume_ml("1L×6팩")                   → 6000
     parse_volume_ml("椰汁245ml*24盒")            → 5880
     parse_volume_ml("1.5L")                     → 1500   (개수가 없으면 1개)
+    parse_volume_ml("오리지널", "205g×10팩")       → 2050   (g 는 ml 로 본다, 1g = 1ml)
+    parse_volume_ml("1.25kg×6병")               → 7500
     parse_volume_ml("복숭아맛")                  → None   (용량을 못 읽음)
 
-규칙: 첫 번째 "숫자 + ml/L" 를 용량으로 보고, 그 뒤의 "×N" (또는 "N팩/N개/N盒" …) 를 개수로 본다.
+규칙: 첫 번째 "숫자 + ml/L/g/kg" 를 용량으로 보고 (g·kg 는 1g = 1ml 로 환산, 2026-10-24 사용자 결정), 그 뒤의 "×N" (또는 "N팩/N개/N盒" …) 를 개수로 본다.
 """
 
 import re
 from decimal import Decimal
 from typing import Optional
 
-# 숫자 + 단위. ml 을 l 보다 먼저 본다. 단위 뒤에 영문자가 붙으면(예: 5lb) 용량이 아니다.
-_VOLUME = re.compile(r"(\d+(?:\.\d+)?)\s*(ml|毫升|l|리터|升)(?![a-z])", re.IGNORECASE)
+# 숫자 + 단위. ml 을 l 보다, kg 를 g 보다 먼저 본다. 단위 뒤에 영문자가 붙으면(예: 5lb) 용량이 아니다.
+# g·kg 는 무게지만 음료는 1g = 1ml 로 본다 (2026-10-24 사용자 결정).
+_VOLUME = re.compile(
+    r"(\d+(?:\.\d+)?)\s*(ml|毫升|kg|公斤|千克|l|리터|升|g|克)(?![a-z])", re.IGNORECASE
+)
 # ×N — 곱하기 기호 여러 가지 (× ✕ x X * ＊)
 _TIMES = re.compile(r"^\s*[×✕xX*＊]\s*(\d+)")
 # N팩 · N개 … (곱하기 기호 없이 개수만 적은 경우)
 _COUNT_UNIT = re.compile(r"(\d+)\s*(팩|개|병|캔|입|박스|盒|瓶|罐|支|袋|听|箱)")
 
-_ML_PER_UNIT = {"ml": 1, "毫升": 1, "l": 1000, "리터": 1000, "升": 1000}
+_ML_PER_UNIT = {
+    "ml": 1, "毫升": 1, "l": 1000, "리터": 1000, "升": 1000,
+    "g": 1, "克": 1, "kg": 1000, "公斤": 1000, "千克": 1000,
+}
 
 
 def parse_volume_ml(*texts: Optional[str]) -> Optional[int]:
