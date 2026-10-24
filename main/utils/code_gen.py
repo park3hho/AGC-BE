@@ -2,6 +2,7 @@
 
     PR-261018-0001   제품 (날짜 = 제품 추가일, KST)
     RS-261018-000A   가격 조사 (날짜 = 조사일)
+    OR-261024-0001   고객 주문 (날짜 = 마켓 주문일, KST)
 
 순번은 같은 날짜·접두사 중 가장 큰 코드 + 1. 대문자 고정 길이라 문자열 정렬 = 숫자 정렬이다.
 동시에 두 건이 같은 번호를 잡으면 DB unique 가 막는다 → 호출측이 IntegrityError 때 다시 발급한다.
@@ -14,6 +15,7 @@ from fastapi import HTTPException
 
 PRODUCT_CODE_PREFIX = "PR"
 SURVEY_CODE_PREFIX = "RS"
+ORDER_CODE_PREFIX = "OR"
 CODE_MAX_SEQ = 0xFFFF
 CODE_ISSUE_RETRIES = 5        # 동시 발급 충돌 시 재시도 횟수
 

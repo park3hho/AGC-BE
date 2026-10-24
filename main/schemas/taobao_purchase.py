@@ -4,7 +4,7 @@ from typing import Optional
 
 from pydantic import BaseModel, Field, field_validator
 
-from core.purchase_config import CN_STATUS, PURCHASE_ITEMS_MAX, PURCHASE_LINKS_MAX
+from core.purchase_config import CN_STATUS, PURCHASE_ITEMS_MAX
 from schemas.company_account import _clean_url
 
 
@@ -22,11 +22,6 @@ class PurchaseItemIn(BaseModel):
         return v
 
 
-class OrderLinkIn(BaseModel):
-    order_id: int
-    quantity: Optional[int] = Field(default=None, ge=1, le=9999)
-
-
 def _blank(v):
     if v is None:
         return None
@@ -34,19 +29,14 @@ def _blank(v):
     return v or None
 
 
-def _clean_links(v: list[OrderLinkIn]) -> list[OrderLinkIn]:
-    ids = [l.order_id for l in v]
-    if len(ids) != len(set(ids)):
-        raise ValueError("같은 마켓 주문이 두 번 연결됐습니다.")
+def _order_no(v):
+    v = _blank(v)
     if not v:
-        raise ValueError("마켓 주문을 하나 이상 연결해주세요.")
-    if len(v) > PURCHASE_LINKS_MAX:
-        raise ValueError(f"마켓 주문은 {PURCHASE_LINKS_MAX}개까지 연결할 수 있습니다.")
-    return v
+        raise ValueError("타오바오 주문번호를 입력해주세요.")
+    return v.replace(" ", "")
 
 
 class _Common(BaseModel):
-    taobao_order_no: Optional[str] = Field(default=None, max_length=40)
     shop_name: Optional[str] = Field(default=None, max_length=200)
     item_url: Optional[str] = Field(default=None, max_length=508)
     items: list[PurchaseItemIn] = Field(default_factory=list, max_length=PURCHASE_ITEMS_MAX)
@@ -57,10 +47,9 @@ class _Common(BaseModel):
     cn_courier: Optional[str] = Field(default=None, max_length=50)
     cn_tracking_no: Optional[str] = Field(default=None, max_length=60)
     arrived_at: Optional[datetime] = None
-    warehouse_ref: Optional[str] = Field(default=None, max_length=60)
     memo: Optional[str] = Field(default=None, max_length=2000)
 
-    @field_validator("taobao_order_no", "cn_tracking_no", "warehouse_ref")
+    @field_validator("cn_tracking_no")
     @classmethod
     def no_spaces(cls, v):
         v = _blank(v)
@@ -85,19 +74,25 @@ class _Common(BaseModel):
 
 
 class TaobaoPurchaseCreate(_Common):
-    orders: list[OrderLinkIn]
+    order_id: int                                       # 고객 주문 (MarketOrder)
+    taobao_order_no: str = Field(max_length=40)
 
-    @field_validator("orders")
+    @field_validator("taobao_order_no")
     @classmethod
-    def links(cls, v):
-        return _clean_links(v)
+    def order_no(cls, v):
+        return _order_no(v)
 
 
 class TaobaoPurchaseUpdate(_Common):
-    """PATCH — 보낸 필드만 바꾼다. orders 를 보내면 연결을 그 목록으로 통째로 바꾼다."""
+    """PATCH — 보낸 필드만 바꾼다. 붙은 고객 주문은 바꾸지 않는다 (잘못 붙였으면 삭제 후 다시)."""
 
+    taobao_order_no: Optional[str] = Field(default=None, max_length=40)
     cn_status: Optional[str] = None
-    orders: Optional[list[OrderLinkIn]] = None
+
+    @field_validator("taobao_order_no")
+    @classmethod
+    def order_no(cls, v):
+        return _order_no(v)
 
     @field_validator("cn_status")
     @classmethod
@@ -105,10 +100,3 @@ class TaobaoPurchaseUpdate(_Common):
         if v is None or v not in CN_STATUS:
             raise ValueError("중국 배송 상태가 올바르지 않습니다.")
         return v
-
-    @field_validator("orders")
-    @classmethod
-    def links(cls, v):
-        if v is None:
-            raise ValueError("마켓 주문을 하나 이상 연결해주세요.")
-        return _clean_links(v)

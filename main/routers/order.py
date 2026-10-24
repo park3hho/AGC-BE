@@ -36,10 +36,11 @@ async def list_orders(
     pccc: Optional[Literal["ok", "mismatch", "missing", "error", "pending"]] = None,
     page: int = Query(default=1, ge=1),
     size: int = Query(default=50, ge=1, le=200),
+    q: Optional[str] = Query(default=None, max_length=60),   # 자사 코드(OR-…) · 마켓 주문번호 검색
     auth=Depends(require_feature(Feature.ORDER)),
 ):
     try:
-        return success(**await OrderService.list(stage, market, pccc, page, size))
+        return success(**await OrderService.list(stage, market, pccc, page, size, q))
     except HTTPException:
         raise
     except Exception as e:

@@ -12,9 +12,7 @@ CN_STATUS = {
 # 기록(OrderEvent)에 이전값 → 새값으로 남길 칸
 PURCHASE_TRACKED = (
     "taobao_order_no", "shop_name", "item_url", "items", "paid_cny", "purchased_at", "purchased_by_id",
-    "cn_status", "shipped_at", "cn_courier", "cn_tracking_no", "arrived_at", "warehouse_ref",
-    "status_source", "memo",
+    "cn_status", "shipped_at", "cn_courier", "cn_tracking_no", "arrived_at", "status_source", "memo",
 )
 
 PURCHASE_ITEMS_MAX = 30
-PURCHASE_LINKS_MAX = 50

@@ -26,13 +26,14 @@ def _fail(what: str, e: Exception, purchase_id=None):
 async def list_purchases(
     order_id: Optional[int] = Query(default=None, ge=1),
     cn_status: Optional[str] = Query(default=None),
+    q: Optional[str] = Query(default=None, max_length=40),
     limit: int = Query(default=100, ge=1, le=500),
     auth=Depends(require_feature(Feature.ORDER)),
 ):
     if cn_status and cn_status not in CN_STATUS:
         raise HTTPException(status_code=400, detail="중국 배송 상태가 올바르지 않습니다.")
     try:
-        items = await TaobaoPurchaseService.list(order_id, cn_status, limit)
+        items = await TaobaoPurchaseService.list(order_id, cn_status, q, limit)
         return success(items=items, cn_status=CN_STATUS)
     except HTTPException:
         raise
@@ -44,7 +45,7 @@ async def list_purchases(
 async def create_purchase(body: TaobaoPurchaseCreate, auth=Depends(require_feature(Feature.ORDER))):
     try:
         p = await TaobaoPurchaseService.create(body, auth)
-        logger.info(f"타오바오 구매 추가: purchase_id={p['id']} orders={[o['id'] for o in p['orders']]} by={auth['user_id']}")
+        logger.info(f"타오바오 구매 추가: purchase_id={p['id']} order_id={p['order']['id']} by={auth['user_id']}")
         return success(purchase=p)
     except HTTPException:
         raise

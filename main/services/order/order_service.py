@@ -10,12 +10,15 @@ import os
 from datetime import datetime, timedelta, timezone
 
 from fastapi import HTTPException
+from tortoise.exceptions import IntegrityError
+from tortoise.expressions import Q
 
 from core.account_crypto import decrypt_secret, encrypt_secret
 from models.order.order import MarketOrder, OrderEvent, OrderSyncRun
 from services.order import market_clients as mc
 from services.order.pccc import (PcccInput, check_pccc, mask_name, mask_phone, norm_pccc, norm_phone, norm_zip,
                                  receiver_fingerprint)
+from utils.code_gen import CODE_ISSUE_RETRIES, ORDER_CODE_PREFIX, next_code
 
 logger = logging.getLogger(__name__)
 KST = timezone(timedelta(hours=9))
@@ -186,8 +189,27 @@ async def run_pccc_check(o: MarketOrder, actor: dict, reason: str, run=None) -> 
     return o
 
 
-# ------------------------------------------------------------ 저장 (새 주문 · 바뀐 주문)
-async def upsert_line(line: dict, actor: dict, run) -> str:
+# ------------------------------------------------------------ 자사 주문 코드 OR-YYMMDD-XXXX
+async def issue_code(o: MarketOrder, actor: dict, run=None) -> str:
+    """코드가 없으면 발급 (날짜 = 마켓 주문일 KST, 없으면 결제일·오늘). 동시에 같은 번호를 잡으면 다시 발급."""
+    if o.code:
+        return o.code
+    base = o.ordered_at or o.paid_at or datetime.now(timezone.utc)
+    day = base.astimezone(KST).date()
+    for _ in range(CODE_ISSUE_RETRIES):
+        o.code = await next_code(MarketOrder, ORDER_CODE_PREFIX, day)
+        try:
+            await o.save(update_fields=["code", "updated_at"])
+        except IntegrityError:
+            o.code = None
+            continue
+        await log_event(o, actor, "code_issued", f"자사 주문 코드 {o.code} 발급",
+                        {"code": {"from": None, "to": o.code}, "order_no": o.order_no, "line_no": o.line_no}, run)
+        return o.code
+    raise HTTPException(status_code=409, detail="자사 주문 코드를 발급하지 못했습니다. 잠시 후 다시 시도해주세요.")
+
+
+# ------------------------------------------------------------ 저장 (새 주문 · 바뀐 주문)async def upsert_line(line: dict, actor: dict, run) -> str:
     """반환: created · changed · same."""
     fp = receiver_fingerprint(line["pccc"], line["receiver_name"], line["phone"], line["zip"])
     fields = {k: line[k] for k in ("order_no", "ship_unit_no", "market_status", "confirmed", "stage", "ordered_at", "paid_at",
@@ -201,8 +223,9 @@ async def upsert_line(line: dict, actor: dict, run) -> str:
 
     if o is None:
         o = await MarketOrder.create(market=line["market"], line_no=line["line_no"], **fields, **secret)
+        await issue_code(o, actor, run)
         await log_event(o, actor, "collected", f"{m} 주문 수집 — {line['product_name'][:60]} ×{line['quantity']} ({line['market_status']})", {
-            "market": line["market"], "line_no": line["line_no"], "order_no": line["order_no"], "market_status": line["market_status"],
+            "code": o.code, "market": line["market"], "line_no": line["line_no"], "order_no": line["order_no"], "market_status": line["market_status"],
             "confirmed": line["confirmed"], "quantity": line["quantity"], "total_price": line["total_price"],
             "receiver": {"name": mask_name(line["receiver_name"]), "phone": mask_phone(line["phone"]), "zip": line["zip"]},
         }, run)
@@ -311,7 +334,7 @@ def order_dict(o: MarketOrder) -> dict:
     phone, pccc = _dec(o.receiver_phone_enc), _dec(o.pccc_enc)
     from services.order.pccc import mask_pccc
     return {
-        "id": o.id, "market": o.market, "line_no": o.line_no, "order_no": o.order_no, "ship_unit_no": o.ship_unit_no,
+        "id": o.id, "code": o.code, "market": o.market, "line_no": o.line_no, "order_no": o.order_no, "ship_unit_no": o.ship_unit_no,
         "market_status": o.market_status, "confirmed": o.confirmed, "stage": o.stage,
         "ordered_at": _fmt(o.ordered_at), "paid_at": _fmt(o.paid_at), "ship_due_at": _fmt(o.ship_due_at),
         "product_name": o.product_name, "option_name": o.option_name, "seller_code": o.seller_code,
@@ -334,8 +357,11 @@ def event_dict(e: OrderEvent) -> dict:
 
 class OrderService:
     @staticmethod
-    async def list(stage: str | None, market: str | None, pccc: str | None, page: int, size: int) -> dict:
+    async def list(stage: str | None, market: str | None, pccc: str | None, page: int, size: int, q: str | None = None) -> dict:
         qs = MarketOrder.all()
+        if q:   # 자사 코드 · 마켓 주문번호 · 줄 번호
+            q = q.strip()
+            qs = qs.filter(Q(code__icontains=q) | Q(order_no__icontains=q) | Q(line_no__icontains=q))
         if stage:
             qs = qs.filter(stage=stage)
         if market:
