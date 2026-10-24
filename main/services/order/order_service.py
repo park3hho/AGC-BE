@@ -209,7 +209,8 @@ async def issue_code(o: MarketOrder, actor: dict, run=None) -> str:
     raise HTTPException(status_code=409, detail="자사 주문 코드를 발급하지 못했습니다. 잠시 후 다시 시도해주세요.")
 
 
-# ------------------------------------------------------------ 저장 (새 주문 · 바뀐 주문)async def upsert_line(line: dict, actor: dict, run) -> str:
+# ------------------------------------------------------------ 저장 (새 주문 · 바뀐 주문)
+async def upsert_line(line: dict, actor: dict, run) -> str:
     """반환: created · changed · same."""
     fp = receiver_fingerprint(line["pccc"], line["receiver_name"], line["phone"], line["zip"])
     fields = {k: line[k] for k in ("order_no", "ship_unit_no", "market_status", "confirmed", "stage", "ordered_at", "paid_at",
