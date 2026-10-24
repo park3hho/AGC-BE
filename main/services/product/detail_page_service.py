@@ -194,6 +194,7 @@ def _user_ref(u) -> Optional[dict]:
 def _page_summary(dp: DetailPage) -> dict:
     return {
         "status": dp.status.value if hasattr(dp.status, "value") else dp.status,
+        "created_at": dp.created_at.isoformat(),          # 디자인 시작 (첫 저장)
         "updated_at": dp.updated_at.isoformat(),
         "updated_by": _user_ref(dp.updated_by),
         "reviewed_at": dp.reviewed_at.isoformat() if dp.reviewed_at else None,

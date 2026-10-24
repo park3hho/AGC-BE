@@ -13,6 +13,7 @@ TORTOISE_ORM = {
                 "models.product.price_survey",
                 "models.product.pricing",       # 판매처별 가격 설정 · 옵션 판매가 · 환율 캐시
                 "models.product.detail_page",   # 상세페이지(디자인) · 검수 기록 · S6 공통 안내
+                "models.product.listing",       # 마켓 등록 기록 (쿠팡·네이버에 올린 상품)
                 # user — 로그인 계정 · company_account — 회사 외부 서비스 계정 + 비밀번호 열람 기록
                 "models.user.user",
                 "models.company_account.company_account",

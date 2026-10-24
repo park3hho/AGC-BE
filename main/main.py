@@ -24,6 +24,7 @@ from routers import (
     detail_page,
     exchange_rate,
     health,
+    listing,
     price_survey,
     pricing,
     product,
@@ -78,6 +79,7 @@ app.include_router(company_info.router)
 app.include_router(shipping_address.router)
 app.include_router(order.router)
 app.include_router(taobao_purchase.router)
+app.include_router(listing.router)
 app.include_router(product.router)
 app.include_router(price_survey.router)
 app.include_router(pricing.router)

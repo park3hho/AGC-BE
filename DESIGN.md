@@ -459,6 +459,13 @@ detail_page_common (행 1개, id=1 — S6 해외구매대행 안내 + 등록번�
 - 기본은 고객 주문 1건 = 타오바오 주문 1건 (여러 개도 허용). 집운 쪽 매칭은 나중에 집운 번호로 따로.
 - 바꿀 때마다 그 고객 주문의 `OrderEvent` (`purchase_*`, data = 이전값 → 새값, 시각은 UTC 로 맞춰 비교). 상태 이름은 `core/purchase_config.CN_STATUS`.
 
+### 6.6 마켓 등록 기록 (2026-10-24)
+
+- **`market_listing`** (`models/product/listing.py`) — 제품을 판매처에 올린 상품 1건. `product` FK (CASCADE) · `platform` (coupang/naver) · `market_product_id` (쿠팡 sellerProductId · 네이버 원상품번호, `platform` 과 unique) · `title` · `url` · `status`(마켓이 준 상태) · `listed_at`(업로드 일시) · `items` jsonb `[{option_id, name, sale_price, market_item_id, sku}]` · `source` api/manual · `synced_at` · `memo` · `created_by` · `deleted_at`.
+- 쿠팡에서 불러오기(`services/product/listing_service.py`): 셀러 상품 목록 → 상세 → 옵션 SKU `{제품 코드}-{옵션 id}` 로 제품을 찾는다. 같은 번호는 덮어쓰고, 사람이 지운 번호는 살리지 않는다. 쿠팡 호출은 `services/order/market_clients._coupang_get`(서명) 을 같이 쓴다.
+- 권한 `listing` (member 포함, API 키 불가). 보기는 로그인만.
+- 상세페이지 응답(`DetailPageSummary`)에 `created_at`(디자인 시작) 추가 — 상품 상세의 '디자인 시간' 계산용.
+
 ## 7. 환경 · 실행
 
 **.env**
