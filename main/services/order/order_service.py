@@ -395,6 +395,11 @@ class OrderService:
         return await OrderService.get(order_id)
 
     @staticmethod
+    async def collect_status() -> dict:
+        runs = {m: run_dict(await OrderSyncRun.filter(market=m).order_by("-id").first()) for m in MARKETS}
+        return {"last_runs": runs, "poll_minutes": POLL_MINUTES}
+
+    @staticmethod
     async def runs(market: str | None, limit: int) -> list[dict]:
         qs = OrderSyncRun.all()
         if market:

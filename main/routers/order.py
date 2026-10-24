@@ -63,6 +63,17 @@ async def collect_orders(body: CollectBody, auth=Depends(require_feature(Feature
     return success(runs=runs)
 
 
+@router.get("/collect-status")
+async def collect_status(auth=Depends(require_feature(Feature.ORDER))):
+    """앱 아래 바용 — 마켓별 마지막 수집 1건 + 자동 수집 주기 (가볍게)."""
+    try:
+        return success(**await OrderService.collect_status())
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise _fail("수집 상태 조회", e)
+
+
 @router.get("/sync-runs")
 async def list_sync_runs(market: Optional[Market] = None, limit: int = Query(default=20, ge=1, le=100),
                          auth=Depends(require_feature(Feature.ORDER))):
