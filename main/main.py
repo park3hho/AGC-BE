@@ -12,9 +12,11 @@ from core.config import UPLOAD_DIR, UPLOAD_URL_PREFIX, setup_middlewares
 from core.response_utils import success
 from database import TORTOISE_ORM
 from services.pricing.exchange_rate_service import fx_auto_loop
+from services.order.order_service import order_poll_loop
 from routers import (
     api_credential,
     shipping_address,
+    order,
     auth,
     company_account,
     company_info,
@@ -42,12 +44,15 @@ async def lifespan(app: FastAPI):
     async with RegisterTortoise(app, config=TORTOISE_ORM):
         # 환율 자동 받기 — DB 연결이 살아 있는 동안만 돈다 (core/pricing_config.FX_AUTO_INTERVAL_SEC)
         fx_task = asyncio.create_task(fx_auto_loop())
+        # 주문 자동 수집 — ORDER_POLL_MINUTES=0(기본)이면 바로 끝난다 (주기는 나중에 정함)
+        order_task = asyncio.create_task(order_poll_loop())
         try:
             yield
         finally:
-            fx_task.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
-                await fx_task
+            for task in (fx_task, order_task):
+                task.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await task
 
 
 # API 문서(Swagger·ReDoc·openapi.json)는 기본 비공개. dev 에서는 .env 에 ENABLE_DOCS=1.
@@ -70,6 +75,7 @@ app.include_router(company_account.router)
 app.include_router(api_credential.router)
 app.include_router(company_info.router)
 app.include_router(shipping_address.router)
+app.include_router(order.router)
 app.include_router(product.router)
 app.include_router(price_survey.router)
 app.include_router(pricing.router)

@@ -19,6 +19,7 @@ TORTOISE_ORM = {
                 "models.company_account.api_credential",   # API 키 묶음 · 비밀값 · 열람 기록
                 "models.company_account.company_info",     # 회사 정보 › 기본 정보 (번호·계좌·서류) + 서류 파일
                 "models.shipping.address",   # 출고지·반품지 주소록 (마켓 주소 코드)
+                "models.order.order",   # 마켓 주문 · 추적 기록(OrderEvent) · 수집 기록(OrderSyncRun)
                 "aerich.models",
             ],
             "default_connection": "default",

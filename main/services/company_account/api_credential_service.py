@@ -130,3 +130,14 @@ class ApiCredentialService:
                 raise HTTPException(status_code=404, detail="비밀값을 찾지 못했습니다.")
             await ApiCredentialSecretView.create(secret_id=s.id, user_id=actor_id, ip=(ip or None) and ip[:64])
             return decrypt_secret(s.value_enc)
+
+
+async def credential_values(service: str) -> tuple[dict, dict]:
+    """서버 안에서 외부 API 를 부를 때만 쓴다 — (공개값 {label: value}, 비밀값 {label: 평문}).
+    사람이 보는 열람(reveal)이 아니라 열람 기록은 남기지 않는다. 반환값을 응답·로그에 넣지 말 것."""
+    c = await alive_credentials().filter(service=service).first()
+    if not c:
+        raise HTTPException(status_code=503, detail=f"'{service}' API 키가 등록되지 않았습니다.")
+    public = {p["label"]: p["value"] for p in (c.public_values or [])}
+    secrets = {s.label: decrypt_secret(s.value_enc) for s in await _secrets_of(c.id)}
+    return public, secrets
