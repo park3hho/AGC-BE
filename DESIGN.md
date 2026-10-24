@@ -452,6 +452,15 @@ detail_page_common (행 1개, id=1 — S6 해외구매대행 안내 + 등록번�
 
 ---
 
+### 6.5 타오바오 구매 · 중국 내 배송 (2026-10-24)
+
+```
+market_order N ──< taobao_purchase_link >── N taobao_purchase
+```
+- **`taobao_purchase`** (`models/order/purchase.py`) — 타오바오 주문번호 1개 = 1행. 구매(`taobao_order_no` · `shop_name` · `item_url` · `items` jsonb `[{name, qty, price_cny}]` · `paid_cny` decimal(12,2) · `purchased_at` · `purchased_by`) + 중국 내 배송(`cn_status` ordered/shipped/arrived/problem/cancelled · `shipped_at` · `cn_courier` · `cn_tracking_no` · `arrived_at` · `warehouse_ref` · `status_source` manual/poll · `status_checked_at`). 소프트 삭제. 주문번호 중복은 서비스에서 409.
+- **`taobao_purchase_link`** — 구매 ↔ 마켓 주문 (unique purchase+order, `quantity` = 그 주문 몫). 마켓 주문은 RESTRICT.
+- 바꿀 때마다 연결된 마켓 주문마다 `OrderEvent` (`purchase_*`, data = 이전값 → 새값). 헬퍼는 `services/order/order_service.log_event` · `actor_of`. 상태 이름은 `core/purchase_config.CN_STATUS`.
+- 나중에 집운 입고 폴링이 `cn_status`·`arrived_at` 을 채울 때는 `status_source=poll` + `status_checked_at`, 행위자는 system 으로 기록한다.
 ## 7. 환경 · 실행
 
 **.env**

@@ -17,6 +17,7 @@ from routers import (
     api_credential,
     shipping_address,
     order,
+    taobao_purchase,
     auth,
     company_account,
     company_info,
@@ -76,6 +77,7 @@ app.include_router(api_credential.router)
 app.include_router(company_info.router)
 app.include_router(shipping_address.router)
 app.include_router(order.router)
+app.include_router(taobao_purchase.router)
 app.include_router(product.router)
 app.include_router(price_survey.router)
 app.include_router(pricing.router)

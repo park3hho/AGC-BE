@@ -20,6 +20,7 @@ TORTOISE_ORM = {
                 "models.company_account.company_info",     # 회사 정보 › 기본 정보 (번호·계좌·서류) + 서류 파일
                 "models.shipping.address",   # 출고지·반품지 주소록 (마켓 주소 코드)
                 "models.order.order",   # 마켓 주문 · 추적 기록(OrderEvent) · 수집 기록(OrderSyncRun)
+                "models.order.purchase",   # 타오바오 구매 · 중국 내 배송 (마켓 주문과 다대다)
                 "aerich.models",
             ],
             "default_connection": "default",
