@@ -27,7 +27,7 @@ server {
 
     add_header Strict-Transport-Security "max-age=31536000" always;
 
-    client_max_body_size 11m;       # 사진 업로드 10MB + 여유
+    client_max_body_size 50m;       # 상세 이미지 조각 합계 45MB(네이버 PNG 무손실) + 여유 · 사진 업로드 10MB
 
     location / {
         proxy_pass http://app:8000;

@@ -367,7 +367,7 @@ class DetailPageService:
     @staticmethod
     async def save_export(product_id: int, platform: ExportPlatform, c_hash: str, template: str,
                           blobs: "list[bytes]", user_id: int) -> dict:
-        """상세 이미지(JPG 조각) 저장 — 승인된 페이지 · 그린 시점 해시가 지금과 같을 때만."""
+        """상세 이미지 조각(네이버 PNG · 쿠팡 JPG) 저장 — 승인된 페이지 · 그린 시점 해시가 지금과 같을 때만."""
         p = await _get_product(product_id)
         dp = await _get_page(product_id)
         exports.require_approved(dp)

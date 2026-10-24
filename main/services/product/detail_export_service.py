@@ -1,8 +1,10 @@
-"""상세 이미지 내보내기 (JPG) — 승인된 상세페이지를 FE 가 판매처 폭으로 잘라 그린 JPG 조각을 받아 저장한다. BE DESIGN.md §6.4
+"""상세 이미지 내보내기 — 승인된 상세페이지를 FE 가 판매처 폭으로 잘라 그린 조각을 받아 저장한다. BE DESIGN.md §6.4
+
+  · 형식: 네이버 PNG(무손실) · 쿠팡 JPG(품질 100) — core/detail_page_config.EXPORT_FORMATS. 확장자가 아니라 파일 머리로 확인한다.
 
   · 그림은 FE 가 그린다 (편집 미리보기와 같은 템플릿 · 같은 Pretendard 글꼴). BE 는 받은 조각을 검사하고 저장만 한다.
   · content_hash — 그릴 때의 content + 공통 안내 해시. 지금 해시와 다르면(그 사이에 바뀜) 받지 않는다.
-  · 저장 위치: {UPLOAD_DIR}/detail/{제품 코드}/v{버전}/{코드}_{판매처}_{순번}.jpg — 버전마다 새 폴더라 덮어쓰지 않는다.
+  · 저장 위치: {UPLOAD_DIR}/detail/{제품 코드}/v{버전}/{코드}_{판매처}_{순번}.{png|jpg} — 버전마다 새 폴더라 덮어쓰지 않는다.
 """
 
 import hashlib
@@ -16,9 +18,12 @@ from tortoise.transactions import in_transaction
 from core.config import UPLOAD_DIR, UPLOAD_URL_PREFIX
 from core.detail_page_config import (
     EXPORT_DIR,
+    EXPORT_FORMATS,
+    EXPORT_MAX_FILE_BYTES,
     EXPORT_MAX_FILES,
     EXPORT_MAX_HEIGHT,
     EXPORT_MAX_TOTAL_BYTES,
+    EXPORT_MAX_TOTAL_HEIGHT,
     EXPORT_WIDTHS,
     DetailStatus,
     ExportPlatform,
@@ -64,26 +69,51 @@ def jpeg_size(data: bytes) -> tuple[int, int] | None:
     return None
 
 
+_PNG_SIG = b"\x89PNG\r\n\x1a\n"
+_MB = 1024 * 1024
+
+
+def png_size(data: bytes) -> tuple[int, int] | None:
+    """PNG 머리(IHDR)에서 (폭, 높이)를 읽는다. PNG 가 아니면 None."""
+    if len(data) < 24 or not data.startswith(_PNG_SIG) or data[12:16] != b"IHDR":
+        return None
+    return int.from_bytes(data[16:20], "big"), int.from_bytes(data[20:24], "big")
+
+
+_SIZE_READERS = {"png": png_size, "jpg": jpeg_size}
+
+
 def check_slices(platform: ExportPlatform, blobs: list[bytes]) -> list[dict]:
-    """조각 검사 — JPEG · 판매처 폭 · 최대 높이 · 개수 · 합계 크기. 통과하면 조각별 정보."""
+    """조각 검사 — 판매처 형식(네이버 PNG · 쿠팡 JPG) · 폭 · 최대 높이 · 장당 크기 · 개수 · 합계. 통과하면 조각별 정보."""
     if not blobs:
         raise HTTPException(status_code=400, detail="이미지 조각이 없습니다.")
     if len(blobs) > EXPORT_MAX_FILES:
         raise HTTPException(status_code=400, detail=f"이미지 조각은 {EXPORT_MAX_FILES}장까지 올릴 수 있습니다.")
     if sum(len(b) for b in blobs) > EXPORT_MAX_TOTAL_BYTES:
-        raise HTTPException(status_code=413, detail="이미지 조각 합계가 10MB 를 넘습니다.")
+        raise HTTPException(status_code=413,
+                            detail=f"이미지 조각 합계가 {EXPORT_MAX_TOTAL_BYTES // _MB}MB 를 넘습니다.")
     want = EXPORT_WIDTHS[platform]
+    fmt = EXPORT_FORMATS[platform]
+    max_file = EXPORT_MAX_FILE_BYTES[platform]
     out = []
     for idx, b in enumerate(blobs, 1):
-        size = jpeg_size(b)
+        size = _SIZE_READERS[fmt](b)
         if not size:
-            raise HTTPException(status_code=415, detail=f"{idx}번째 조각이 JPG 가 아닙니다.")
+            raise HTTPException(status_code=415,
+                                detail=f"{idx}번째 조각이 {fmt.upper()} 가 아닙니다 ({platform.value} 는 {fmt.upper()}).")
+        if len(b) > max_file:
+            raise HTTPException(status_code=413,
+                                detail=f"{idx}번째 조각이 {len(b) / _MB:.1f}MB 입니다 (최대 {max_file // _MB}MB).")
         w, h = size
         if w != want:
             raise HTTPException(status_code=400, detail=f"{idx}번째 조각 폭이 {w}px 입니다 ({platform.value} 는 {want}px).")
         if not 0 < h <= EXPORT_MAX_HEIGHT:
             raise HTTPException(status_code=400, detail=f"{idx}번째 조각 높이가 {h}px 입니다 (최대 {EXPORT_MAX_HEIGHT}px).")
         out.append({"width": w, "height": h, "size": len(b), "sha256": hashlib.sha256(b).hexdigest()})
+    max_total_h = EXPORT_MAX_TOTAL_HEIGHT.get(platform)
+    if max_total_h and sum(m["height"] for m in out) > max_total_h:
+        raise HTTPException(status_code=400,
+                            detail=f"조각 높이 합계가 {max_total_h}px 를 넘습니다 ({platform.value}).")
     return out
 
 
@@ -126,7 +156,7 @@ async def store_export(dp: DetailPage, product_code: str, platform: ExportPlatfo
         try:
             files = []
             for idx, (b, m) in enumerate(zip(blobs, meta), 1):
-                name = f"{code}_{platform.value}_{idx:02d}.jpg"
+                name = f"{code}_{platform.value}_{idx:02d}.{EXPORT_FORMATS[platform]}"
                 path = dest_dir / name
                 path.write_bytes(b)
                 written.append(path)
@@ -154,7 +184,8 @@ async def read_uploads(files: list[UploadFile]) -> list[bytes]:
             data += chunk
             total += len(chunk)
             if total > EXPORT_MAX_TOTAL_BYTES:
-                raise HTTPException(status_code=413, detail="이미지 조각 합계가 10MB 를 넘습니다.")
+                raise HTTPException(status_code=413,
+                                    detail=f"이미지 조각 합계가 {EXPORT_MAX_TOTAL_BYTES // _MB}MB 를 넘습니다.")
         blobs.append(bytes(data))
     return blobs
 

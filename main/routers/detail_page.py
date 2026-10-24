@@ -101,7 +101,7 @@ async def save_export(
     files: list[UploadFile] = File(...),
     auth=Depends(require_feature(Feature.DETAIL_REVIEW)),
 ):
-    # 승인한 사람(검수 권한)이 그린 JPG 조각만 받는다 — API 키 불가
+    # 승인한 사람(검수 권한)이 그린 이미지 조각만 받는다 (네이버 PNG · 쿠팡 JPG) — API 키 불가
     try:
         blobs = await read_uploads(files)
         return success(export=await DetailPageService.save_export(
