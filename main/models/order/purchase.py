@@ -18,6 +18,15 @@ class TaobaoPurchase(BaseModel):
     items = fields.JSONField(default=list)                          # [{name, qty, price_cny}] — 옵션(맛·용량)·수량·단가
     paid_cny = fields.DecimalField(max_digits=12, decimal_places=2, null=True)   # 실제 결제 위안 (할인·배송비 반영 합계)
     purchased_at = fields.DatetimeField(null=True)
+
+    # 실제 결제 — 결제창 금액(통화 그대로)과 카드사·카카오페이가 실제로 청구한 원화 (2026-10-25)
+    pay_method = fields.CharField(max_length=20, null=True)         # core/purchase_config.PAY_METHOD — card · kakaopay · alipay · other
+    pay_currency = fields.CharField(max_length=3, null=True)        # 결제창 통화 USD · KRW · CNY
+    pay_amount = fields.DecimalField(max_digits=12, decimal_places=2, null=True)  # 결제창 금액 (타오바오 결제 수수료 포함)
+    charged_krw = fields.IntField(null=True)                        # 실제 청구 원화 (카드 해외수수료 등 포함)
+    charged_status = fields.CharField(max_length=10, default="none")  # none 모름 · approved 승인 금액 · settled 청구 확정
+    charged_at = fields.DatetimeField(null=True)                    # 승인(결제) 일시
+    charged_source = fields.CharField(max_length=100, null=True)    # 어디서 확인했는지 (카드사 승인내역 · 카카오페이 결제내역 등)
     purchased_by = fields.ForeignKeyField(
         "models.User", related_name="taobao_purchases", null=True, on_delete=fields.SET_NULL
     )

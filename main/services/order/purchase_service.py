@@ -20,6 +20,8 @@ FIELD_LABEL = {
     "paid_cny": "결제 위안", "purchased_at": "구매 일시", "purchased_by_id": "구매한 사람", "cn_status": "중국 배송 상태",
     "shipped_at": "판매처 발송", "cn_courier": "중국 택배사", "cn_tracking_no": "중국 운송장", "arrived_at": "창고 입고",
     "status_source": "상태 출처", "memo": "메모",
+    "pay_method": "결제수단", "pay_currency": "결제 통화", "pay_amount": "결제 금액", "charged_krw": "실제 청구 원화",
+    "charged_status": "청구 확인", "charged_at": "결제 일시", "charged_source": "확인한 곳",
 }
 
 
@@ -54,6 +56,10 @@ async def purchase_dict(p: TaobaoPurchase) -> dict:
         "cn_status": p.cn_status, "shipped_at": _iso(p.shipped_at), "cn_courier": p.cn_courier,
         "cn_tracking_no": p.cn_tracking_no, "arrived_at": _iso(p.arrived_at),
         "status_source": p.status_source, "status_checked_at": _iso(p.status_checked_at), "memo": p.memo,
+        "pay_method": p.pay_method, "pay_currency": p.pay_currency,
+        "pay_amount": _plain(p.pay_amount) if p.pay_amount is not None else None,
+        "charged_krw": p.charged_krw, "charged_status": p.charged_status, "charged_at": _iso(p.charged_at),
+        "charged_source": p.charged_source,
         "created_at": p.created_at.isoformat(), "updated_at": p.updated_at.isoformat(),
     }
 
@@ -122,6 +128,8 @@ class TaobaoPurchaseService:
         actor = actor_of(auth)
         data = body.model_dump(exclude={"order_id", "items"})
         data["items"] = _items(body)
+        if data.get("charged_status") is None:
+            data.pop("charged_status", None)      # 기본값 none (모름)
         _auto_times(data, None)
         async with in_transaction() as conn:
             order = await MarketOrder.get_or_none(id=body.order_id).using_db(conn)
