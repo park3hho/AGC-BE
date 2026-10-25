@@ -70,7 +70,8 @@ async def naver_changed_product_order_ids(since: datetime, until: datetime) -> l
     token = await _naver_auth()
     ids: list[str] = []
     start = since
-    while start < until:
+    # 끝에 1초도 안 되는 자투리 구간이 남으면 네이버가 '조회 날짜가 유효하지 않습니다'(400)로 거절한다 → 건너뜀 (다음 수집이 10분 겹쳐 받음)
+    while until - start > timedelta(seconds=1):
         end = min(start + timedelta(hours=24), until)
         params = {"lastChangedFrom": start.astimezone(KST).isoformat(timespec="milliseconds"),
                   "lastChangedTo": end.astimezone(KST).isoformat(timespec="milliseconds")}
@@ -104,13 +105,18 @@ COUPANG_SERVICE = "쿠팡 OpenAPI"
 COUPANG_RECEIVE_STATUSES = ("ACCEPT", "INSTRUCT")      # 결제완료 · 상품준비중 — 접수 단계
 
 
-async def _coupang_get(path: str, query: str) -> dict:
+async def _coupang_call(method: str, path: str, query: str = "", body: dict | None = None) -> dict:
     public, secrets = await credential_values(COUPANG_SERVICE)
     dt = datetime.now(timezone.utc).strftime("%y%m%dT%H%M%SZ")
-    sig = hmac.new(secrets["Secret Key"].encode(), (dt + "GET" + path + query).encode(), hashlib.sha256).hexdigest()
+    sig = hmac.new(secrets["Secret Key"].encode(), (dt + method + path + query).encode(), hashlib.sha256).hexdigest()
     auth = f"CEA algorithm=HmacSHA256, access-key={secrets['Access Key']}, signed-date={dt}, signature={sig}"
-    return await http("GET", f"{COUPANG_BASE}{path}?{query}",
-                      {"Authorization": auth, "Content-Type": "application/json;charset=UTF-8"})
+    url = f"{COUPANG_BASE}{path}" + (f"?{query}" if query else "")
+    data = json.dumps(body).encode() if body is not None else None
+    return await http(method, url, {"Authorization": auth, "Content-Type": "application/json;charset=UTF-8"}, data)
+
+
+async def _coupang_get(path: str, query: str) -> dict:
+    return await _coupang_call("GET", path, query)
 
 
 async def coupang_vendor_id() -> str:
@@ -142,3 +148,35 @@ async def coupang_ordersheets(since: datetime, until: datetime, statuses=COUPANG
                     break
             start = end + timedelta(days=1)
     return out
+
+
+# ---------------------------------------------------------------- 발주확인 (쓰기) — 2026-10-25
+async def coupang_acknowledge(shipment_box_ids: list[str]) -> dict:
+    """쿠팡 상품준비중 처리 (결제완료 ACCEPT 에서만). 반환: {box_id: (성공, 메시지)} + raw."""
+    vendor = await coupang_vendor_id()
+    path = f"/v2/providers/openapi/apis/api/v4/vendors/{vendor}/ordersheets/acknowledgement"
+    body = {"vendorId": vendor, "shipmentBoxIds": [int(x) for x in shipment_box_ids]}
+    data = await _coupang_call("PUT", path, "", body)
+    if str(data.get("code")) not in ("200", "SUCCESS"):
+        raise MarketApiError(f"쿠팡 {data.get('code')} {str(data.get('message'))[:200]}")
+    result = {}
+    for r in (data.get("data") or {}).get("responseList") or []:
+        result[str(r.get("shipmentBoxId"))] = (bool(r.get("succeed")), str(r.get("resultMessage") or r.get("resultCode") or ""))
+    return {"result": result, "raw": data}
+
+
+async def naver_confirm(product_order_ids: list[str]) -> dict:
+    """네이버 발주 확인 (한 번에 30건까지). 반환: {productOrderId: (성공, 메시지)} + raw."""
+    token = await _naver_auth()
+    result, raws = {}, []
+    for i in range(0, len(product_order_ids), 30):
+        body = json.dumps({"productOrderIds": product_order_ids[i:i + 30]}).encode()
+        data = await http("POST", f"{NAVER_BASE}/v1/pay-order/seller/product-orders/confirm",
+                          {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}, body)
+        raws.append(data)
+        d = data.get("data") or {}
+        for s in d.get("successProductOrderInfos") or []:
+            result[str(s.get("productOrderId"))] = (True, "")
+        for f in d.get("failProductOrderInfos") or []:
+            result[str(f.get("productOrderId"))] = (False, str(f.get("message") or f.get("code") or ""))
+    return {"result": result, "raw": raws}

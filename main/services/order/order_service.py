@@ -421,3 +421,49 @@ class OrderService:
         if market:
             qs = qs.filter(market=market)
         return [run_dict(r) for r in await qs.order_by("-id").limit(limit)]
+
+    @staticmethod
+    async def confirm(order_id: int, auth: dict) -> dict:
+        """발주확인 — 마켓에 '주문 확인했어요'를 보낸다 (쿠팡 ACCEPT → 상품준비중 · 네이버 발주 확인).
+        고객 화면이 결제완료 → 상품준비중으로 바뀌어 즉시 취소가 막힌다 (취소는 요청 → 판매자 승인).
+        같은 처리 단위(쿠팡 묶음배송 · 네이버 상품주문)의 AGC 주문 줄은 함께 확인 처리한다.
+        실패하면 409 + 마켓이 준 이유. 성공·실패 모두 OrderEvent(kind=market_confirmed / market_confirm_failed)."""
+        o = await MarketOrder.get_or_none(id=order_id)
+        if not o:
+            raise HTTPException(status_code=404, detail="주문을 찾지 못했습니다.")
+        actor = actor_of(auth)
+        if o.confirmed:
+            return {**await OrderService.get(order_id), "already": True}
+        if o.stage == "cancelled":
+            raise HTTPException(status_code=409, detail="취소된 주문이라 발주확인을 보낼 수 없습니다.")
+        label = MARKET_LABEL.get(o.market, o.market)
+        sent = {"market": o.market, "ship_unit_no": o.ship_unit_no, "market_status_before": o.market_status}
+        try:
+            if o.market == "coupang":
+                if o.market_status != "ACCEPT":
+                    raise HTTPException(status_code=409, detail=f"쿠팡 상태가 결제완료(ACCEPT)가 아니라서 보낼 수 없습니다 (지금 {o.market_status}). 먼저 다시 수집해 주세요.")
+                res = await mc.coupang_acknowledge([o.ship_unit_no])
+            else:
+                res = await mc.naver_confirm([o.ship_unit_no])
+        except mc.MarketApiError as e:
+            await log_event(o, actor, "market_confirm_failed", f"{label} 발주확인 실패 — {str(e)[:120]}", {"sent": sent, "error": str(e)})
+            raise HTTPException(status_code=409, detail=f"{label} 발주확인 실패: {str(e)[:200]}") from None
+        ok, msg = res["result"].get(str(o.ship_unit_no), (False, "마켓 응답에 이 주문이 없음"))
+        received = {"ok": ok, "message": msg}
+        if not ok:
+            await log_event(o, actor, "market_confirm_failed", f"{label} 발주확인 실패 — {msg[:120]}", {"sent": sent, "received": received})
+            raise HTTPException(status_code=409, detail=f"{label} 발주확인 실패: {msg or '이유 없음'}")
+
+        rows = await MarketOrder.filter(market=o.market, ship_unit_no=o.ship_unit_no)
+        for r in rows:
+            before = {"confirmed": r.confirmed, "market_status": r.market_status}
+            r.confirmed = True
+            if r.market == "coupang":
+                r.market_status = "INSTRUCT"
+            await r.save(update_fields=["confirmed", "market_status", "updated_at"])
+            await log_event(r, actor, "market_confirmed", f"{label} 발주확인 보냄 — 고객 화면 상품준비중", {
+                "sent": sent, "received": received,
+                "changes": {"confirmed": {"from": before["confirmed"], "to": True},
+                            "market_status": {"from": before["market_status"], "to": r.market_status}},
+            })
+        return await OrderService.get(order_id)

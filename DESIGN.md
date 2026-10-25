@@ -458,6 +458,7 @@ detail_page_common (행 1개, id=1 — S6 해외구매대행 안내 + 등록번�
 - **`market_order.code`** — 자사 주문 코드 `OR-YYMMDD-XXXX` (unique, 날짜 = 마켓 주문일 KST). `order_service.issue_code` 가 새 주문 생성 직후 발급, 동시 발급 충돌(IntegrityError)은 `CODE_ISSUE_RETRIES` 번까지 다시. 발급 = `OrderEvent(kind=code_issued)`. 마켓 주문번호는 `order_no` + `line_no` 그대로.
 - **`taobao_purchase`** (`models/order/purchase.py`) — 타오바오 주문번호 1개 = 1행, `order` FK → market_order (RESTRICT). 필수 `taobao_order_no`(살아 있는 행끼리 중복이면 서비스에서 409), 선택: `shop_name` · `item_url` · `items` jsonb `[{name, qty, price_cny}]` · `paid_cny` decimal(12,2) · `purchased_at` · `purchased_by` · 중국 내 배송 `cn_status`(ordered/shipped/arrived/problem/cancelled) · `shipped_at` · `cn_courier` · `cn_tracking_no` · `arrived_at`(집운 창고 입고) · `status_source` manual/poll · `status_checked_at`. 소프트 삭제.
 - 기본은 고객 주문 1건 = 타오바오 주문 1건 (여러 개도 허용). 집운 쪽 매칭은 나중에 집운 번호로 따로.
+- **발주확인 먼저** (2026-10-25): 타오바오 구매 등록 전에 `POST /orders/{id}/confirm` 으로 마켓에 발주확인(쿠팡 상품준비중 · 네이버 발주 확인)을 보내야 한다 — 결제완료 상태에선 고객 취소가 바로 돼서 산 뒤 손해. 미확인·취소 주문은 등록 409. 성공·실패는 `OrderEvent` `market_confirmed` / `market_confirm_failed`.
 - 바꿀 때마다 그 고객 주문의 `OrderEvent` (`purchase_*`, data = 이전값 → 새값, 시각은 UTC 로 맞춰 비교). 상태 이름은 `core/purchase_config.CN_STATUS`.
 
 ### 6.6 마켓 등록 기록 (2026-10-24)

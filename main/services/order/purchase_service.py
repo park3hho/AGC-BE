@@ -127,6 +127,11 @@ class TaobaoPurchaseService:
             order = await MarketOrder.get_or_none(id=body.order_id).using_db(conn)
             if not order:
                 raise HTTPException(status_code=404, detail="고객 주문을 찾지 못했습니다.")
+            # 발주확인 전에는 타오바오 구매를 등록하지 않는다 — 결제완료 상태에선 고객 취소가 바로 돼서 산 뒤 손해 (2026-10-25)
+            if order.stage == "cancelled":
+                raise HTTPException(status_code=409, detail="취소된 주문에는 타오바오 구매를 등록할 수 없습니다.")
+            if not order.confirmed:
+                raise HTTPException(status_code=409, detail="먼저 마켓에 발주확인을 보내 주세요 (주문이 상품준비중이 된 뒤에 타오바오 구매를 등록해요).")
             await _check_no_free(data["taobao_order_no"], None, conn)
             p = await TaobaoPurchase.create(
                 order_id=order.id, **data, purchased_by_id=auth["user_id"], created_by_id=auth["user_id"],

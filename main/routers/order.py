@@ -100,3 +100,16 @@ async def recheck_pccc(order_id: int, auth=Depends(require_feature(Feature.ORDER
         raise
     except Exception as e:
         raise _fail("통관부호 검증", e)
+
+
+@router.post("/{order_id}/confirm")
+async def confirm_order(order_id: int, auth=Depends(require_feature(Feature.ORDER))):
+    """발주확인을 마켓에 보낸다 (쿠팡 상품준비중 · 네이버 발주 확인). 타오바오 구매 등록 전에 해야 한다."""
+    try:
+        data = await OrderService.confirm(order_id, auth)
+        logger.info(f"발주확인: order_id={order_id} by={auth['user_id']} already={data.get('already', False)}")
+        return success(**data)
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise _fail("발주확인", e)
