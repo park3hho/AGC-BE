@@ -469,6 +469,25 @@ detail_page_common (행 1개, id=1 — S6 해외구매대행 안내 + 등록번�
 - 권한 `listing` (member 포함, API 키 불가). 보기는 로그인만.
 - 상세페이지 응답(`DetailPageSummary`)에 `created_at`(디자인 시작) 추가 — 상품 상세의 '디자인 시간' 계산용.
 
+### 6.7 상품 등록 배송 조건 — 무료배송 고정 (2026-10-25 사용자 결정)
+
+배송비(국제 + 국내)는 판매가에 이미 들어 있다 (§ 가격 책정). 그래서 **AGC 가 만드는 모든 마켓 등록은 무료배송**으로 올린다 — 네이버쇼핑 · 쿠팡 검색 목록에 '무료배송' 표시가 떠야 한다. 상세페이지 S1 끝의 무료배송 띠와 S6 '배송 · 배송비' 문구도 같은 전제다. 상품 등록(API) 코드는 아직 없다(쿠팡 0038 3건은 수동·일회성 스크립트로 등록) — 만들 때 아래를 기본값으로 쓴다.
+
+| 판매처 | 필드 | 값 |
+|---|---|---|
+| 쿠팡 | `deliveryChargeType` / `deliveryCharge` / `freeShipOverAmount` | `FREE` / `0` / `0` |
+| 쿠팡 | `deliveryChargeOnReturn` (초도 반품배송비) | `0` |
+| 쿠팡 | `returnCharge` (반품배송비, 단순변심 실비) | 대표가 ≤ 20,000원 → `5000`, 초과 → `10000` (2026-10-24 규칙 유지) |
+| 쿠팡 | `remoteAreaDeliverable` | `N` (제주·도서산간 추가비 없음) |
+| 쿠팡 | `deliveryMethod` · `deliveryCompanyCode` · 출고지 · 반품지 | `AGENT_BUY` · `CJGLS` · 출고지 25556899(집운 웨이하이) · 반품지 1002733719 |
+| 네이버 | `deliveryInfo.deliveryFee.deliveryFeeType` / `baseFee` | `FREE` / `0` |
+| 네이버 | `claimDeliveryInfo.returnDeliveryFee` · `exchangeDeliveryFee` | 단순변심 실비 — 쿠팡과 같은 금액 규칙 (편도 반품비 5,000 / 10,000, 교환은 왕복 = 2배) |
+| 네이버 | 제주·도서산간 추가 배송비 | 넣지 않음 |
+
+- 2026-10-25 읽기 확인(쿠팡 GET): 제품 38 의 3건 모두 `FREE` · `deliveryCharge 0` · `remoteAreaDeliverable N` · `returnCharge` 5,000(18,400원 2건) / 10,000(26,300·42,000원 1건) — 위 규칙과 같다.
+- 하자·오배송·설명과 다름의 반품비는 판매자 부담(전자상거래법 §18). 단순변심만 실비 청구, 반품위약금·보관비 등 추가 청구 금지.
+- 무료배송에 조건(제주·도서산간 추가비 등)을 붙이려면 상세페이지 S6 와 무료배송 띠 문구도 같이 고친다.
+
 ## 7. 환경 · 실행
 
 **.env**
