@@ -254,6 +254,12 @@ async def upsert_line(line: dict, actor: dict, run) -> str:
     if receiver_changed:
         parts.append("수취인·통관 정보 바뀜")
     await log_event(o, actor, "changed", f"{m} 주문 변경 — " + ", ".join(parts or ["세부 정보"]), data, run)
+    # 마켓에서 발주확인이 된 걸 수집으로 알게 됨 (AGC 발주확인 버튼으로 보낸 게 아님) — 단계가 보이게 따로 남긴다
+    if diff.get("confirmed", [None, None])[1] is True:
+        await log_event(o, actor, "market_confirmed", f"{m} 발주확인됨 — 마켓에서 확인 (수집으로 감지, AGC 에서 보낸 것 아님)", {
+            "step": "발주확인", "stage": "receive", "source": f"{line['market']}_api", "detected_by": "collect",
+            "status": {"from": diff.get("market_status", [o.market_status, o.market_status])[0], "to": line["market_status"]},
+        }, run)
     if receiver_changed and o.stage != "cancelled":
         await run_pccc_check(o, actor, "수취인·통관 정보 바뀜", run)
     return "changed"
