@@ -22,6 +22,7 @@ TORTOISE_ORM = {
                 "models.shipping.address",   # 출고지·반품지 주소록 (마켓 주소 코드)
                 "models.order.order",   # 마켓 주문 · 추적 기록(OrderEvent) · 수집 기록(OrderSyncRun)
                 "models.order.purchase",   # 타오바오 구매 · 중국 내 배송 (마켓 주문과 다대다)
+                "models.order.jiyun",   # 집운 기록 — 배송 요청 · 배송비 결제 · 출고 · 국제 운송장 · 국내 송장
                 "aerich.models",
             ],
             "default_connection": "default",

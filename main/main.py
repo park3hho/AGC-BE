@@ -18,6 +18,7 @@ from routers import (
     shipping_address,
     order,
     taobao_purchase,
+    jiyun,
     auth,
     company_account,
     company_info,
@@ -79,6 +80,7 @@ app.include_router(company_info.router)
 app.include_router(shipping_address.router)
 app.include_router(order.router)
 app.include_router(taobao_purchase.router)
+app.include_router(jiyun.router)
 app.include_router(listing.router)
 app.include_router(product.router)
 app.include_router(price_survey.router)
