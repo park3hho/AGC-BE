@@ -33,7 +33,7 @@ class Hero(_In):
     name: str = Field(default="", max_length=T_LINE)
     name_sub: str = Field(default="", max_length=T_LINE)
     badges: list[Badge] = Field(default_factory=list, max_length=4)
-    photo_url: Optional[str] = Field(default=None, max_length=PHOTO)
+    photo_url: Optional[str] = Field(default=None, max_length=PHOTO)   # 원래 비율로, 860 폭 · 최대 1100px 높이 (넘으면 위 기준 자름)
 
 
 class PointItem(_In):
@@ -41,6 +41,7 @@ class PointItem(_In):
     desc: str = Field(default="", max_length=T_LINE)
     big: str = Field(default="", max_length=20)                 # 오른쪽 큰 숫자
     big_unit: str = Field(default="", max_length=T_SHORT)
+    photo_url: Optional[str] = Field(default=None, max_length=PHOTO)   # 있으면 사진 카드 (사진 위 · 글 아래)
 
 
 class Points(_In):
@@ -63,12 +64,24 @@ class FlavorItem(_In):
         return [c[:T_SHORT] for c in v if c and c.strip()]
 
 
+class GalleryItem(_In):
+    photo_url: Optional[str] = Field(default=None, max_length=PHOTO)
+    caption: str = Field(default="", max_length=T_LINE)
+
+
+class Gallery(_In):
+    """S3 끝 구성 · 포장 사진 (0~4장, 사진 없는 칸은 안 그림)"""
+    title: str = Field(default="", max_length=T_SHORT)
+    items: list[GalleryItem] = Field(default_factory=list, max_length=4)
+
+
 class Flavors(_In):
-    """S3 맛 선택"""
+    """S3 맛 선택 — items[].photo_url 은 제품 사진 아무거나"""
     title: str = Field(default="", max_length=T_SHORT)
     lead: str = Field(default="", max_length=T_LINE)
     items: list[FlavorItem] = Field(default_factory=list, max_length=12)
     notes: list[str] = Field(default_factory=list, max_length=4)
+    gallery: Gallery = Field(default_factory=Gallery)
 
 
 class InfoRow(_In):
@@ -87,6 +100,8 @@ class Info(_In):
     rows: list[InfoRow] = Field(default_factory=list, max_length=15)
     nutrition: list[Nutri] = Field(default_factory=list, max_length=6)
     note: str = Field(default="", max_length=T_LINE)
+    label_photo_url: Optional[str] = Field(default=None, max_length=PHOTO)   # 현지 라벨 원본 사진 (정보 표 위)
+    label_caption: str = Field(default="", max_length=T_LINE)
 
 
 class HowItem(_In):

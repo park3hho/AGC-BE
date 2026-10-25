@@ -440,6 +440,7 @@ detail_page_common (행 1개, id=1 — S6 해외구매대행 안내 + 등록번�
 **규칙**
 - 목록 대상 = **가격 책정 완료** 제품 (모든 판매처 판매가 저장 — FE `pricingStatusOf` 의 `done`).
 - 템플릿 채우기 (`build_template`): 제품 이름 · 최근 가격 조사의 옵션(option1 = 맛, option2 = 용량·입수) · 옵션별 사진으로 칸을 채우고, 사람이 써야 하는 칸은 `[[...]]` **확인 표시**로 남긴다. 페이지가 없으면 GET 이 템플릿만 주고(저장 안 함), 첫 PUT 이 초안으로 만든다.
+  - 사진 (2026-10-25): 대표(`hero.photo_url`) = 제품 대표 사진, 맛 카드 = 옵션별 사진, 남는 추가 사진(`product.photos`)은 `points.items[0..2].photo_url` 에 차례로. 스키마에 `points.items[].photo_url` · `flavors.gallery{title, items[{photo_url, caption}] ≤ 4}` · `info.label_photo_url` · `info.label_caption` 추가 (모두 선택, 마이그레이션 없음 — content 는 JSON).
 - **확인 표시 `[[...]]`** (`MARKER_RE`): 미리보기에 노란 표시로 보인다 (가안 문구는 `[[가안]]`). 남아 있어도 승인은 되고 FE 가 경고만 한다 (`marker_count`).
 - **승인 = 휴먼 체크 '확인' 한 번** (2026-10-22 사용자 결정: "확인 누르면 휴먼체크한 걸로"). 예전 5항목 체크리스트 · 등록번호 필수 · 확인 표시 0개 조건은 없얗다. 남은 조건: 사람 로그인(`detail_review`, API 키 불가) · 아직 승인 안 됨(`draft` · `review` · `changes` 어디서든). 등록번호 미입력(`reg_no_ready` false) · 확인 표시는 FE 경고만. `checks` 는 받아도 무시, `review_checks` 는 null.
 - **승인 = 지금 보이는 그대로를 사람이 확인함.** 승인 뒤 content 가 바뀌면 그 페이지는 검수 대기로, 공통 안내가 바뀌면 승인된 페이지 전부 검수 대기로 돌아간다 (`reset` 기록).
