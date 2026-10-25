@@ -133,9 +133,7 @@ def build_template(p: Product, options: list[PriceSurveyOption]) -> dict:
         if o.photo_url:
             first_photo.setdefault(o.option1, o.photo_url)
     hero_photo = p.photo_url or next((first_photo[n] for n in flavor_names if n in first_photo), None)
-    # 맛 카드·대표에 안 쓴 추가 사진 → 포인트 사진 카드로 차례대로 (사람·에이전트가 다시 고른다)
-    used = {hero_photo, *first_photo.values()}
-    spare = [u for u in _uniq(p.photos or []) if u not in used]
+    # 포인트 사진은 자동으로 채우지 않는다 — 맞는 사진만 사람·에이전트가 고른다 (2026-10-25, 사진 잘림 방지)
     name = p.title_ko or p.title_cn
 
     content = {
@@ -151,8 +149,7 @@ def build_template(p: Product, options: list[PriceSurveyOption]) -> dict:
             "title": "이런 음료예요",
             "lead": "[[어떤 분께 맞는지 한 줄]]",
             "items": [
-                {"title": "[[포인트]]", "desc": "[[설명]]", "big": "", "big_unit": "",
-                 "photo_url": spare[i] if i < len(spare) else None}
+                {"title": "[[포인트]]", "desc": "[[설명]]", "big": "", "big_unit": "", "photo_url": None}
                 for i in range(3)
             ],
         },
