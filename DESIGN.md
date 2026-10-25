@@ -485,6 +485,7 @@ detail_page_common (행 1개, id=1 — S6 해외구매대행 안내 + 등록번�
 | `BE_DOMAIN` | BE 공개 주소 — 도메인 또는 공인 IP (현재 공인 IP, 도메인 없음). nginx 가 사용. 비어 있으면 nginx 는 발급용 http 만 연다 |
 | `SESSION_SAME_SITE` | production 쿠키 SameSite. `lax` 권장 (Vercel rewrite 로 같은 출처). FE 가 다른 도메인에서 BE 를 직접 부르면 `none` |
 | `TZ` | `Asia/Seoul` |
+| `ORDER_POLL_MINUTES` | 주문 자동 수집 주기(분). 0 = 끔. 운영 **5** (2026-10-25 사용자 결정 — 쿠팡 발주서는 결제 뒤 몇 분 늦게 잡혀서 자동으로 다시 받음). 바꾸면 `docker compose up -d app` |
 
 **Docker Compose 구성**
 | 서비스 | 이미지 | 포트 | 볼륨 |

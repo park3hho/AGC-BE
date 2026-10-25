@@ -27,7 +27,7 @@ MARKET_LABEL = {"naver": "네이버", "coupang": "쿠팡"}
 FIRST_RANGE = timedelta(days=3)          # 처음 수집할 때 거슬러 올라갈 기간
 OVERLAP = timedelta(minutes=10)          # 지난 수집과 겹쳐 받는 구간 (빠짐 방지)
 MAX_RANGE = timedelta(days=31)
-POLL_MINUTES = int(os.getenv("ORDER_POLL_MINUTES", "0") or 0)   # 0 = 자동 수집 끔 (구간은 나중에 정함)
+POLL_MINUTES = int(os.getenv("ORDER_POLL_MINUTES", "0") or 0)   # 0 = 자동 수집 끔 · 운영 .env 는 5분 (2026-10-25 사용자 결정)
 
 _locks = {m: asyncio.Lock() for m in MARKETS}
 
@@ -307,7 +307,7 @@ async def collect_market(market: str, auth: dict | None, trigger: str = "manual"
 
 
 async def order_poll_loop() -> None:
-    """ORDER_POLL_MINUTES 마다 두 마켓 주문을 가져온다. 0 이면 돌지 않는다 (지금은 꺼 둠 — 구간은 나중에 정함)."""
+    """ORDER_POLL_MINUTES 마다 두 마켓 주문을 가져온다. 0 이면 돌지 않는다 (운영은 5분 — 2026-10-25)."""
     if POLL_MINUTES <= 0:
         return
     while True:
