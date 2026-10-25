@@ -6,6 +6,11 @@ from pydantic import BaseModel, Field, field_validator
 USAGE_MAX_LEN = 30
 USAGES_MAX = 10
 URL_MAX_LEN = 500
+MEMO_MAX_LEN = 1000
+
+
+def _clean_memo(v: Optional[str]) -> Optional[str]:
+    return (v or "").strip() or None
 
 
 def _required_text(v: str) -> str:
@@ -53,6 +58,7 @@ class CompanyAccountCreate(BaseModel):
     password: str = Field(min_length=1, max_length=500)    # 앞뒤 공백도 비밀번호일 수 있으니 그대로 저장
     usages: list[str] = Field(default_factory=list)
     url: Optional[str] = Field(default=None, max_length=URL_MAX_LEN + 8)   # 홈페이지 — 없어도 됨
+    memo: Optional[str] = Field(default=None, max_length=MEMO_MAX_LEN)     # 비고 — 없어도 됨
 
     def __repr__(self) -> str:      # 로그·오류 메시지에 비밀번호가 찍히지 않게
         return f"CompanyAccountCreate(platform={self.platform!r}, login_id={self.login_id!r}, usages={self.usages!r})"
@@ -74,6 +80,11 @@ class CompanyAccountCreate(BaseModel):
     def validate_url(cls, v):
         return _clean_url(v)
 
+    @field_validator("memo")
+    @classmethod
+    def validate_memo(cls, v):
+        return _clean_memo(v)
+
 
 class CompanyAccountUpdate(BaseModel):
     """PATCH — 보낸 필드만 바꾼다. password 는 보냈을 때만 새로 암호화해 바꾼다. url 에 null/"" 을 보내면 지운다."""
@@ -83,6 +94,7 @@ class CompanyAccountUpdate(BaseModel):
     password: Optional[str] = Field(default=None, min_length=1, max_length=500)
     usages: Optional[list[str]] = None
     url: Optional[str] = Field(default=None, max_length=URL_MAX_LEN + 8)
+    memo: Optional[str] = Field(default=None, max_length=MEMO_MAX_LEN)     # null/"" = 지움
 
     def __repr__(self) -> str:
         return f"CompanyAccountUpdate(fields={sorted(self.model_fields_set)!r})"
@@ -114,3 +126,8 @@ class CompanyAccountUpdate(BaseModel):
     @classmethod
     def validate_url(cls, v):
         return _clean_url(v)
+
+    @field_validator("memo")
+    @classmethod
+    def validate_memo(cls, v):
+        return _clean_memo(v)
