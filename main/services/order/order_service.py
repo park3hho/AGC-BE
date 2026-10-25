@@ -265,6 +265,36 @@ async def upsert_line(line: dict, actor: dict, run) -> str:
     return "changed"
 
 
+# ------------------------------------------------------------ 한 주문만 다시 보기 · 발주확인 시각
+async def refresh_order(o: MarketOrder, actor: dict, reason: str) -> MarketOrder:
+    """이 주문 하나만 마켓에서 바로 다시 받아 저장한다 (바뀐 게 있으면 changed · market_confirmed 기록).
+    마켓에서 바로 한 발주확인을 AGC 가 아직 모를 때 — 예: 타오바오 구매 등록 직전."""
+    if o.market == "coupang":
+        box = await mc.coupang_ordersheet(o.ship_unit_no)
+        lines = parse_coupang(box) if box else []
+    else:
+        items = await mc.naver_product_orders([o.ship_unit_no])
+        lines = [ln for it in items for ln in parse_naver(it)]
+    for ln in lines:
+        if ln["line_no"] == o.line_no:
+            await upsert_line(ln, actor, None)
+    fresh = await MarketOrder.get(id=o.id)
+    logger.info(f"주문 다시 보기: order_id={o.id} reason={reason} confirmed={fresh.confirmed}")
+    return fresh
+
+
+async def confirmed_at(o: MarketOrder) -> datetime | None:
+    """발주확인된 시각 — AGC 가 보낸 기록(market_confirmed)이나 수집으로 알게 된 기록 중 가장 이른 것.
+    수집으로 알게 된 경우는 '알게 된 시각'이라 실제보다 늦을 수 있다."""
+    times = []
+    for e in await OrderEvent.filter(order_id=o.id, kind__in=["market_confirmed", "changed"]).order_by("id"):
+        d = e.data or {}
+        if e.kind == "changed" and (d.get("diff") or {}).get("confirmed", [None, None])[1] is not True:
+            continue
+        times.append(_dt(d.get("occurred_at")) or e.created_at)
+    return min(times) if times else None
+
+
 # ------------------------------------------------------------ 수집
 async def _default_range(market: str, now: datetime) -> tuple[datetime, datetime]:
     last = await OrderSyncRun.filter(market=market, ok=True).order_by("-range_to").first()

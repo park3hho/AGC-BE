@@ -3,7 +3,8 @@
 추적: 추가·수정·삭제마다 그 고객 주문의 OrderEvent 한 줄 (data.changes = 이전값 → 새값). 개인정보는 다루지 않는다.
 상태가 '판매처 발송'·'창고 입고'로 바뀌었는데 시각이 비어 있으면 지금 시각을 넣는다."""
 
-from datetime import datetime, timezone
+import logging
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 
 from fastapi import HTTPException
@@ -13,7 +14,9 @@ from core.purchase_config import CN_STATUS, PURCHASE_TRACKED
 from models.order.order import MarketOrder
 from models.order.purchase import TaobaoPurchase
 from schemas.taobao_purchase import TaobaoPurchaseCreate, TaobaoPurchaseUpdate
-from services.order.order_service import actor_of, log_event
+from services.order.order_service import actor_of, confirmed_at, log_event, refresh_order
+
+logger = logging.getLogger(__name__)
 
 FIELD_LABEL = {
     "taobao_order_no": "타오바오 주문번호", "shop_name": "판매처", "item_url": "상품 링크", "items": "옵션·수량",
@@ -131,6 +134,21 @@ class TaobaoPurchaseService:
         if data.get("charged_status") is None:
             data.pop("charged_status", None)      # 기본값 none (모름)
         _auto_times(data, None)
+        # 발주확인 먼저 (2026-10-25) — AGC 가 아직 모르면 마켓에서 이 주문만 바로 다시 본다 (Wing·센터에서 직접 한 경우)
+        pre = await MarketOrder.get_or_none(id=body.order_id)
+        if pre and not pre.confirmed and pre.stage != "cancelled":
+            try:
+                pre = await refresh_order(pre, actor, "타오바오 구매 등록 전 발주확인 다시 보기")
+            except Exception as e:      # 마켓 조회가 안 되면 원래 판단(아래)대로
+                logger.warning(f"구매 등록 전 주문 다시 보기 실패: order_id={body.order_id} {type(e).__name__}")
+        # 구매 시각이 발주확인보다 앞서면 막는다 — 고객이 바로 취소할 수 있는 상태에서 산 것이 된다
+        if pre and pre.confirmed and data.get("purchased_at"):
+            c_at = await confirmed_at(pre)
+            if c_at and data["purchased_at"] < c_at - timedelta(minutes=2):
+                kst = lambda t: t.astimezone(timezone(timedelta(hours=9))).strftime("%m-%d %H:%M")
+                raise HTTPException(status_code=409, detail=(
+                    f"구매 시각({kst(data['purchased_at'])})이 발주확인({kst(c_at)})보다 앞서요. "
+                    "발주확인을 먼저 보내고 산 시각을 적어 주세요 (마켓에서 직접 확인했다면 그 시각이 AGC 에 늦게 잡혔을 수 있어요)."))
         async with in_transaction() as conn:
             order = await MarketOrder.get_or_none(id=body.order_id).using_db(conn)
             if not order:

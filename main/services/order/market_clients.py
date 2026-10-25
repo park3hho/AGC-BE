@@ -150,6 +150,16 @@ async def coupang_ordersheets(since: datetime, until: datetime, statuses=COUPANG
     return out
 
 
+async def coupang_ordersheet(shipment_box_id: str) -> dict | None:
+    """발주서 단건 조회 (묶음배송번호) — 상태만 바로 다시 볼 때 (타오바오 구매 등록 직전 등)."""
+    vendor = await coupang_vendor_id()
+    data = await _coupang_get(f"/v2/providers/openapi/apis/api/v4/vendors/{vendor}/ordersheets/{int(shipment_box_id)}", "")
+    if str(data.get("code")) not in ("200", "SUCCESS"):
+        raise MarketApiError(f"쿠팡 {data.get('code')} {str(data.get('message'))[:200]}")
+    d = data.get("data")
+    return (d[0] if d else None) if isinstance(d, list) else d
+
+
 # ---------------------------------------------------------------- 발주확인 (쓰기) — 2026-10-25
 async def coupang_acknowledge(shipment_box_ids: list[str]) -> dict:
     """쿠팡 상품준비중 처리 (결제완료 ACCEPT 에서만). 반환: {box_id: (성공, 메시지)} + raw."""
