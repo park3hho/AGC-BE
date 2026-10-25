@@ -113,7 +113,7 @@ async def _pricings(product_id: int, base_survey_id: Optional[int], option_ids: 
     return result
 
 
-async def _bundles(survey_id: Optional[int], options: list[PriceSurveyOption]) -> list[dict]:
+async def _bundles(survey_id: Optional[int], options: list[PriceSurveyOption], product_code: str) -> list[dict]:
     """묶음 판매 옵션 = 10kg 제안 + 어느 판매처에든 판매가가 저장된 묶음. 조사 옵션 순서 → 묶음 수 순서.
     suggested = 규칙이 제안한 묶음 (저장된 것과 겹치면 둘 다 참일 수 있음, saved 는 판매가가 있는지)."""
     if not survey_id or not options:
@@ -127,7 +127,9 @@ async def _bundles(survey_id: Optional[int], options: list[PriceSurveyOption]) -
     order = {o.id: i for i, o in enumerate(options)}
     keys = sorted(saved | suggested, key=lambda k: (order[k[0]], k[1]))
     return [
-        {**bundle_option_dict(by_id[oid], n, suggested=(oid, n) in suggested), "saved": (oid, n) in saved}
+        {**bundle_option_dict(by_id[oid], n, suggested=(oid, n) in suggested), "saved": (oid, n) in saved,
+         # 마켓 판매자 코드 (쿠팡 externalVendorSku) — 주문이 들어오면 이 코드로 조사 옵션 × 묶음을 찾는다
+         "sku": f"{product_code}-{oid}x{n}"}
         for oid, n in keys
     ]
 
@@ -148,7 +150,7 @@ class PricingService:
             ),
             "fx": fx,                                         # 현재 환율 — 원가·배송비 계산에 쓴다
             "options": [option_dict(o) for o in options],     # 옵션 + 배송비(위안)
-            "bundles": await _bundles(survey.id if survey else None, options),   # 묶음 판매 옵션 (제안 + 저장된 것)
+            "bundles": await _bundles(survey.id if survey else None, options, p.code),   # 묶음 판매 옵션 (제안 + 저장된 것)
             "pricings": await _pricings(
                 p.id, survey.id if survey else None, option_ids, list(Platform), fx["cny_krw"]
             ),
