@@ -33,10 +33,12 @@ class ProductPricing(BaseModel):
 
 
 class OptionPrice(BaseModel):
-    """옵션 1개의 판매처별 판매가 (원)."""
+    """판매 옵션 1개의 판매처별 판매가 (원). 판매 옵션 = 가격 조사 옵션 × 묶음 수.
+    묶음 수 1 = 조사 옵션 그대로. 2 이상 = 그 옵션을 N개 묶어 한 상품으로 판다 (core/shipping_config 묶음 판매)."""
 
     pricing = fields.ForeignKeyField("models.ProductPricing", related_name="option_prices", on_delete=fields.CASCADE)
     option = fields.ForeignKeyField("models.PriceSurveyOption", related_name="prices", on_delete=fields.CASCADE)
+    bundle_qty = fields.SmallIntField(default=1)     # 묶음 수 — 타오바오에서 이 옵션을 몇 개 사서 한 상품으로 파는지
     sale_price = fields.IntField()
 
     # 네이버처럼 "대표가 + 추가금" 판매처에서 추가금 한도를 넘는 옵션을 상품 여러 개로 나눠 등록할 때의 직접 지정값.
@@ -46,7 +48,7 @@ class OptionPrice(BaseModel):
 
     class Meta:
         table = "option_price"
-        unique_together = (("pricing", "option"),)
+        unique_together = (("pricing", "option", "bundle_qty"),)
 
 
 class ExchangeRate(BaseModel):

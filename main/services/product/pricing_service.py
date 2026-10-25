@@ -16,7 +16,7 @@ from models.product.pricing import OptionPrice, ProductPricing
 from models.product.product import Product
 from schemas.pricing import PricingSave
 from services.pricing.exchange_rate_service import ExchangeRateService
-from services.pricing.shipping_service import option_dict
+from services.pricing.shipping_service import bundle_option_dict, bundle_suggestions, option_dict
 from services.product.price_survey_service import alive_surveys
 from services.product.product_service import alive_products
 from services.product.serializers import product_dict
@@ -48,10 +48,11 @@ async def _base_survey(product_id: int) -> Optional[PriceSurvey]:
     return await alive_surveys().filter(product_id=product_id).order_by("-survey_date", "-id").first()
 
 
-def _option_price_dict(option_id: int, op: Optional[OptionPrice]) -> dict:
-    """옵션 1개의 판매가 + (네이버) 상품 나누기 직접 지정값. 저장 안 됐거나 옛 조사 기준이면 빈 값."""
+def _option_price_dict(option_id: int, op: Optional[OptionPrice], bundle_qty: int = 1) -> dict:
+    """판매 옵션 1개의 판매가 + (네이버) 상품 나누기 직접 지정값. 저장 안 됐거나 옛 조사 기준이면 빈 값."""
     return {
         "option_id": option_id,
+        "bundle_qty": bundle_qty,
         "sale_price": op.sale_price if op else None,
         "listing_group": op.listing_group if op else None,
         "is_base": op.is_base if op else False,
@@ -59,8 +60,9 @@ def _option_price_dict(option_id: int, op: Optional[OptionPrice]) -> dict:
 
 
 def _pricing_dict(platform: Platform, pr: Optional[ProductPricing], base_survey_id: Optional[int],
-                  option_ids: list[int], prices: dict[int, OptionPrice], current_fx: str) -> dict:
-    """option_prices 는 기준 조사 options 순서·개수와 같다.
+                  option_ids: list[int], prices: dict[tuple[int, int], OptionPrice], current_fx: str) -> dict:
+    """option_prices 는 기준 조사 options 순서·개수와 같다 (묶음 1).
+    bundle_prices 는 묶음 2 이상으로 저장된 판매가 (응답 bundles 의 일부).
     저장된 survey_id 가 기준 조사와 다르면 판매가는 옛 옵션 기준이라 전부 null.
     fx_rate 는 저장 시점 환율(기록용). 저장 전이면 현재 환율 — 계산은 항상 응답의 fx(현재 환율)로 한다."""
     if pr is None:
@@ -71,6 +73,7 @@ def _pricing_dict(platform: Platform, pr: Optional[ProductPricing], base_survey_
             "shipping_fee": DEFAULT_SHIPPING_FEE, "platform_fee_rate": _dec(fees["platform_fee_rate"], 2),
             "payment_fee_rate": _dec(fees["payment_fee_rate"], 2),
             "option_prices": [_option_price_dict(oid, None) for oid in option_ids],
+            "bundle_prices": [],
             "base_option_id": None,
             "updated_at": None,
         }
@@ -82,7 +85,11 @@ def _pricing_dict(platform: Platform, pr: Optional[ProductPricing], base_survey_
         "shipping_fee": pr.shipping_fee,
         "platform_fee_rate": _dec(pr.platform_fee_rate, 2), "payment_fee_rate": _dec(pr.payment_fee_rate, 2),
         "option_prices": [
-            _option_price_dict(oid, prices.get(oid) if same_survey else None) for oid in option_ids
+            _option_price_dict(oid, prices.get((oid, 1)) if same_survey else None) for oid in option_ids
+        ],
+        "bundle_prices": [
+            _option_price_dict(oid, op, n) for (oid, n), op in sorted(prices.items())
+            if same_survey and n > 1 and oid in option_ids
         ],
         # 대표 옵션 — 옛 조사 기준이면 판매가처럼 null
         "base_option_id": pr.base_option_id if same_survey else None,
@@ -94,16 +101,35 @@ async def _pricings(product_id: int, base_survey_id: Optional[int], option_ids: 
                     platforms: list[Platform], current_fx: str) -> dict[str, dict]:
     rows = await ProductPricing.filter(product_id=product_id, platform__in=platforms)
     by_platform = {Platform(r.platform): r for r in rows}
-    prices_by_pricing: dict[int, dict[int, OptionPrice]] = {r.id: {} for r in rows}
+    prices_by_pricing: dict[int, dict[tuple[int, int], OptionPrice]] = {r.id: {} for r in rows}
     if rows:
         for op in await OptionPrice.filter(pricing_id__in=list(prices_by_pricing)):
-            prices_by_pricing[op.pricing_id][op.option_id] = op
+            prices_by_pricing[op.pricing_id][(op.option_id, op.bundle_qty)] = op
     result = {}
     for pf in platforms:
         pr = by_platform.get(pf)
         prices = prices_by_pricing[pr.id] if pr else {}
         result[pf.value] = _pricing_dict(pf, pr, base_survey_id, option_ids, prices, current_fx)
     return result
+
+
+async def _bundles(survey_id: Optional[int], options: list[PriceSurveyOption]) -> list[dict]:
+    """묶음 판매 옵션 = 10kg 제안 + 어느 판매처에든 판매가가 저장된 묶음. 조사 옵션 순서 → 묶음 수 순서.
+    suggested = 규칙이 제안한 묶음 (저장된 것과 겹치면 둘 다 참일 수 있음, saved 는 판매가가 있는지)."""
+    if not survey_id or not options:
+        return []
+    by_id = {o.id: o for o in options}
+    saved = set(
+        await OptionPrice.filter(pricing__survey_id=survey_id, option_id__in=list(by_id), bundle_qty__gt=1)
+        .values_list("option_id", "bundle_qty")
+    )
+    suggested = {(o.id, n) for o, n in bundle_suggestions(options)}
+    order = {o.id: i for i, o in enumerate(options)}
+    keys = sorted(saved | suggested, key=lambda k: (order[k[0]], k[1]))
+    return [
+        {**bundle_option_dict(by_id[oid], n, suggested=(oid, n) in suggested), "saved": (oid, n) in saved}
+        for oid, n in keys
+    ]
 
 
 class PricingService:
@@ -122,6 +148,7 @@ class PricingService:
             ),
             "fx": fx,                                         # 현재 환율 — 원가·배송비 계산에 쓴다
             "options": [option_dict(o) for o in options],     # 옵션 + 배송비(위안)
+            "bundles": await _bundles(survey.id if survey else None, options),   # 묶음 판매 옵션 (제안 + 저장된 것)
             "pricings": await _pricings(
                 p.id, survey.id if survey else None, option_ids, list(Platform), fx["cny_krw"]
             ),
@@ -135,14 +162,17 @@ class PricingService:
             raise HTTPException(status_code=400, detail="이 제품의 가격 조사가 아닙니다.")
         seen = set()
         for op in body.option_prices:
-            if op.option_id in seen:
-                raise HTTPException(status_code=400, detail=f"같은 옵션의 판매가가 두 번 들어 있습니다: option_id {op.option_id}")
-            seen.add(op.option_id)
+            if (op.option_id, op.bundle_qty) in seen:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"같은 옵션의 판매가가 두 번 들어 있습니다: option_id {op.option_id} 묶음 {op.bundle_qty}",
+                )
+            seen.add((op.option_id, op.bundle_qty))
         survey_option_ids = set(await PriceSurveyOption.filter(survey_id=survey.id).values_list("id", flat=True))
         wrong = [op.option_id for op in body.option_prices if op.option_id not in survey_option_ids]
         if wrong:
             raise HTTPException(status_code=400, detail=f"이 가격 조사의 옵션이 아닙니다: option_id {wrong[0]}")
-        if body.base_option_id is not None and body.base_option_id not in seen:
+        if body.base_option_id is not None and (body.base_option_id, 1) not in seen:
             raise HTTPException(status_code=400, detail="대표 옵션은 판매가가 있는 이 조사의 옵션이어야 합니다.")
 
         fields = {
@@ -169,7 +199,8 @@ class PricingService:
                 await OptionPrice.filter(pricing_id=pr.id).using_db(conn).delete()
                 if body.option_prices:
                     await OptionPrice.bulk_create(
-                        [OptionPrice(pricing_id=pr.id, option_id=op.option_id, sale_price=op.sale_price,
+                        [OptionPrice(pricing_id=pr.id, option_id=op.option_id, bundle_qty=op.bundle_qty,
+                                     sale_price=op.sale_price,
                                      listing_group=op.listing_group, is_base=op.is_base)
                          for op in body.option_prices],
                         using_db=conn,

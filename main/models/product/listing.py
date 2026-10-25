@@ -16,7 +16,7 @@ class MarketListing(BaseModel):
     url = fields.CharField(max_length=1000, null=True)            # 구매자가 보는 상품 페이지
     status = fields.CharField(max_length=30, null=True)           # 마켓이 준 상태 (승인완료 등) · 직접 입력이면 비움
     listed_at = fields.DatetimeField(null=True)                   # 업로드 일시
-    items = fields.JSONField(null=True)                           # [{option_id, name, sale_price, market_item_id, sku}]
+    items = fields.JSONField(null=True)                           # [{option_id, bundle_qty, name, sale_price, market_item_id, sku}]
     source = fields.CharField(max_length=10, default="manual")    # api(마켓에서 불러옴) · manual(직접 입력)
     synced_at = fields.DatetimeField(null=True)                   # 마지막으로 마켓에서 불러온 시각
     memo = fields.CharField(max_length=500, null=True)

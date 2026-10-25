@@ -4,12 +4,14 @@ from typing import Optional
 from pydantic import BaseModel, Field
 
 from core.pricing_config import DEFAULT_FX_MARKUP_PCT
+from core.shipping_config import BUNDLE_MAX_QTY
 
 INT32_MAX = 2_147_483_647   # DB IntField(int4) 한계 — 넘으면 DB 오류(500)가 나므로 스키마에서 막는다
 
 
 class OptionPriceIn(BaseModel):
     option_id: int
+    bundle_qty: int = Field(default=1, ge=1, le=BUNDLE_MAX_QTY)               # 묶음 수 (1 = 조사 옵션 그대로)
     sale_price: int = Field(ge=1, le=INT32_MAX)                              # 판매가 (원)
     # 네이버 상품 나누기 직접 지정 (대표가+추가금 판매처만 의미 있음) — 안 보내면 자동
     listing_group: Optional[int] = Field(default=None, ge=1, le=50)          # 넣을 상품 번호

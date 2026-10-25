@@ -50,3 +50,31 @@ def parse_volume_ml(*texts: Optional[str]) -> Optional[int]:
 
     total = int(per_unit * count)
     return total if total > 0 else None
+
+
+def scale_pack(text: Optional[str], n: int) -> Optional[dict]:
+    """옵션 이름의 개수를 N배로 — 묶음 판매 옵션 이름용.
+
+        scale_pack("330ml×24캔", 2) → {"text": "330ml×48캔", "count": 48, "unit_text": "24캔"}
+        scale_pack("125ml*36盒", 3) → {"text": "125ml*108盒", "count": 108}
+        scale_pack("1.5L", 4)       → {"text": "1.5L×4", "count": 4}
+        scale_pack("복숭아맛", 2)     → None   (용량을 못 읽음)
+    """
+    if not text:
+        return None
+    m = _VOLUME.search(text)
+    if not m:
+        return None
+    rest = text[m.end():]
+    times = _TIMES.match(rest)
+    if times:
+        count = int(times.group(1))
+        s, e = m.end() + times.start(1), m.end() + times.end(1)
+    else:
+        unit = _COUNT_UNIT.search(rest)
+        if not unit:
+            return {"text": f"{text[:m.end()]}×{n}{text[m.end():]}", "count": n, "unit_text": text[m.start():m.end()]}
+        count = int(unit.group(1))
+        s, e = m.end() + unit.start(1), m.end() + unit.end(1)
+    # unit_text = 원래 한 묶음을 나타내는 부분 ("24캔") — "24캔×2" 같은 설명에 쓴다
+    return {"text": f"{text[:s]}{count * n}{text[e:]}", "count": count * n, "unit_text": text[s:].strip()}

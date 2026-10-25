@@ -435,8 +435,10 @@ class OrderService:
             raise HTTPException(status_code=404, detail="주문을 찾지 못했습니다.")
         events = await OrderEvent.filter(order_id=o.id).order_by("-id").prefetch_related("actor_user")
         raw = json.loads(_dec(o.raw_enc) or "null")
+        from services.order.sourcing import order_sourcing   # 순환 import 방지
         return {"order": order_dict(o), "events": [event_dict(e) for e in events], "raw_masked": mask_raw(raw),
-                "receiver_full": receiver_full(o)}
+                "receiver_full": receiver_full(o),
+                "sourcing": await order_sourcing(o)}   # 타오바오에서 살 것 (조사 옵션 × 묶음 수)
 
     @staticmethod
     async def recheck(order_id: int, auth: dict) -> dict:

@@ -18,7 +18,8 @@ from models.product.product import Product
 from schemas.listing import ListingCreate, ListingUpdate
 from services.order.market_clients import KST, MarketApiError, _coupang_get, coupang_vendor_id
 
-SKU_RE = re.compile(r"^(PR-\d{6}-[0-9A-Fa-f]{4})(?:-(\d+))?$")
+# `{제품 코드}-{옵션 id}` · 묶음 판매면 끝에 `x{묶음 수}` (예: PR-261020-0007-66x2 = 옵션 66 두 개 묶음)
+SKU_RE = re.compile(r"^(PR-\d{6}-[0-9A-Fa-f]{4})(?:-(\d+)(?:[xX](\d+))?)?$")
 COUPANG_PRODUCTS_PATH = "/v2/providers/seller_api/apis/api/v1/marketplace/seller-products"
 COUPANG_PAGE_SIZE = 100
 COUPANG_MAX_PAGES = 20          # 2,000개 — 그보다 많아지면 그때 늘린다
@@ -184,6 +185,7 @@ async def _coupang_listings() -> list[dict]:
                 code = code or m.group(1).upper()
             items.append({
                 "option_id": int(m.group(2)) if m and m.group(2) else None,
+                "bundle_qty": int(m.group(3)) if m and m.group(3) else 1,
                 "name": it.get("itemName"),
                 "sale_price": it.get("salePrice"),
                 "market_item_id": str(it.get("vendorItemId") or "") or None,
