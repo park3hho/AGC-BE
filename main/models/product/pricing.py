@@ -72,3 +72,21 @@ class ExchangeRateLog(BaseModel):
 
     class Meta:
         table = "exchange_rate_log"
+
+
+class ProductBundle(BaseModel):
+    """판매 옵션으로 채택한 묶음 (조사 옵션 × N) — 판매가와 따로 남긴다 (2026-10-26).
+    판매가는 사람이 가격 책정에서 정하므로, 채택만 하고 판매가가 빈 묶음이 있을 수 있다.
+    빼면 deleted_at 을 채운다 (기록은 남긴다). 다시 넣으면 같은 줄을 살린다."""
+
+    product = fields.ForeignKeyField("models.Product", related_name="bundles", on_delete=fields.CASCADE)
+    option = fields.ForeignKeyField("models.PriceSurveyOption", related_name="bundles", on_delete=fields.CASCADE)
+    bundle_qty = fields.SmallIntField()
+    source = fields.CharField(max_length=10, default="manual")    # rule(10kg 제안 일괄) · manual(화면에서 추가)
+    created_by = fields.ForeignKeyField("models.User", related_name="created_bundles", null=True,
+                                        on_delete=fields.SET_NULL)
+    deleted_at = fields.DatetimeField(null=True)
+
+    class Meta:
+        table = "product_bundle"
+        unique_together = (("option", "bundle_qty"),)

@@ -23,6 +23,8 @@ _VOLUME = re.compile(
 # ×N — 곱하기 기호 여러 가지 (× ✕ x X * ＊)
 _TIMES = re.compile(r"^\s*[×✕xX*＊]\s*(\d+)")
 # N팩 · N개 … (곱하기 기호 없이 개수만 적은 경우)
+# 괄호 안 박스 수 "(2박스)" — 묶음이면 같이 N배
+_BOX = re.compile(r"([(（]\s*)(\d+)(\s*(?:박스|상자|箱|box)\s*[)）])", re.IGNORECASE)
 _COUNT_UNIT = re.compile(r"(\d+)\s*(팩|개|병|캔|입|박스|盒|瓶|罐|支|袋|听|箱)")
 
 _ML_PER_UNIT = {
@@ -76,5 +78,7 @@ def scale_pack(text: Optional[str], n: int) -> Optional[dict]:
             return {"text": f"{text[:m.end()]}×{n}{text[m.end():]}", "count": n, "unit_text": text[m.start():m.end()]}
         count = int(unit.group(1))
         s, e = m.end() + unit.start(1), m.end() + unit.end(1)
-    # unit_text = 원래 한 묶음을 나타내는 부분 ("24캔") — "24캔×2" 같은 설명에 쓴다
-    return {"text": f"{text[:s]}{count * n}{text[e:]}", "count": count * n, "unit_text": text[s:].strip()}
+    # unit_text = 원래 한 묶음을 나타내는 부분 ("24캔") — "24캔×2" 같은 설명에 쓴다. 괄호 설명은 빼고 단위만
+    unit = re.match(r"[^\s(（]*", text[e:]).group(0)
+    tail = _BOX.sub(lambda b: f"{b.group(1)}{int(b.group(2)) * n}{b.group(3)}", text[e:])   # "(2박스)" → "(6박스)"
+    return {"text": f"{text[:s]}{count * n}{tail}", "count": count * n, "unit_text": f"{count}{unit}"}

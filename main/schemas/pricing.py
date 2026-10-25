@@ -39,3 +39,9 @@ class PricingSave(BaseModel):
     option_prices: list[OptionPriceIn]                                                   # 빠진 옵션 = 판매가 없음
     # 대표 옵션 (네이버 추가금 0원) — option_prices 에 판매가가 있는 옵션이어야 한다. null = 자동
     base_option_id: Optional[int] = None
+
+
+class BundleIn(BaseModel):
+    """묶음 판매 옵션 채택 — 조사 옵션 × 묶음 수 (2 이상)."""
+    option_id: int
+    bundle_qty: int = Field(ge=2, le=BUNDLE_MAX_QTY)

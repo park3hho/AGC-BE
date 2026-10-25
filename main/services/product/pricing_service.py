@@ -1,3 +1,4 @@
+from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Optional
 
@@ -12,7 +13,7 @@ from core.pricing_config import (
     Platform,
 )
 from models.product.price_survey import PriceSurvey, PriceSurveyOption
-from models.product.pricing import OptionPrice, ProductPricing
+from models.product.pricing import OptionPrice, ProductBundle, ProductPricing
 from models.product.product import Product
 from schemas.pricing import PricingSave
 from services.pricing.exchange_rate_service import ExchangeRateService
@@ -123,11 +124,15 @@ async def _bundles(survey_id: Optional[int], options: list[PriceSurveyOption], p
         await OptionPrice.filter(pricing__survey_id=survey_id, option_id__in=list(by_id), bundle_qty__gt=1)
         .values_list("option_id", "bundle_qty")
     )
+    adopted = set(
+        await ProductBundle.filter(option_id__in=list(by_id), deleted_at=None).values_list("option_id", "bundle_qty")
+    )
     suggested = {(o.id, n) for o, n in bundle_suggestions(options)}
     order = {o.id: i for i, o in enumerate(options)}
-    keys = sorted(saved | suggested, key=lambda k: (order[k[0]], k[1]))
+    keys = sorted(saved | suggested | adopted, key=lambda k: (order[k[0]], k[1]))
     return [
         {**bundle_option_dict(by_id[oid], n, suggested=(oid, n) in suggested), "saved": (oid, n) in saved,
+         "adopted": (oid, n) in adopted,   # 판매 옵션으로 채택함 (판매가는 비어 있을 수 있음)
          # 마켓 판매자 코드 (쿠팡 externalVendorSku) — 주문이 들어오면 이 코드로 조사 옵션 × 묶음을 찾는다
          "sku": f"{product_code}-{oid}x{n}"}
         for oid, n in keys
@@ -219,3 +224,45 @@ class PricingService:
         current_fx = (await ExchangeRateService.current())["cny_krw"]
         pricings = await _pricings(p.id, base.id if base else None, option_ids, [platform], current_fx)
         return pricings[platform.value]
+
+
+async def _survey_option(product_id: int, option_id: int) -> PriceSurveyOption:
+    """기준 조사(최신)의 옵션만 묶음으로 쓸 수 있다."""
+    survey = await _base_survey(product_id)
+    opt = await PriceSurveyOption.get_or_none(id=option_id, survey_id=survey.id) if survey else None
+    if not opt:
+        raise HTTPException(status_code=400, detail="이 제품 최신 가격 조사의 옵션이 아닙니다.")
+    return opt
+
+
+class BundleService:
+    """묶음 판매 옵션 채택 · 빼기. 판매가는 가격 책정 저장(PUT pricing)으로 따로 넣는다."""
+
+    @staticmethod
+    async def adopt(product_id: int, option_id: int, bundle_qty: int, user_id: Optional[int],
+                    source: str = "manual") -> dict:
+        p = await _get_product(product_id)
+        opt = await _survey_option(p.id, option_id)
+        d = bundle_option_dict(opt, bundle_qty)
+        if d["over_limit"]:
+            raise HTTPException(status_code=400, detail="30kg 를 넘어 집운 소형으로 보낼 수 없습니다.")
+        row = await ProductBundle.get_or_none(option_id=opt.id, bundle_qty=bundle_qty)
+        if row:
+            if row.deleted_at is not None:
+                row.deleted_at, row.created_by_id, row.source = None, user_id, source
+                await row.save()
+        else:
+            row = await ProductBundle.create(product_id=p.id, option_id=opt.id, bundle_qty=bundle_qty,
+                                             source=source, created_by_id=user_id)
+        return {"key": d["key"], "adopted": True}
+
+    @staticmethod
+    async def drop(product_id: int, option_id: int, bundle_qty: int) -> dict:
+        """채택만 푼다. 저장된 판매가는 가격 책정에서 지우고 저장해야 없어진다."""
+        await _get_product(product_id)
+        row = await ProductBundle.get_or_none(product_id=product_id, option_id=option_id, bundle_qty=bundle_qty,
+                                              deleted_at=None)
+        if row:
+            row.deleted_at = datetime.now(timezone.utc)
+            await row.save(update_fields=["deleted_at", "updated_at"])
+        return {"key": f"{option_id}x{bundle_qty}", "adopted": False}
