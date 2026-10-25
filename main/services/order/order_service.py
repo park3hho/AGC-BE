@@ -79,7 +79,9 @@ def parse_naver(item: dict) -> list[dict]:
         "market_product_id": str(po.get("originalProductId") or po.get("productId") or "") or None,
         "market_option_id": po.get("optionManageCode") or None,
         "quantity": int(po.get("quantity") or 1), "unit_price": _money(po.get("unitPrice")), "total_price": _money(po.get("totalPaymentAmount")),
+        # 네이버는 통관용 전화를 따로 주지 않는다 — 배송지 tel1 을 두 칸에 같이 넣는다
         "receiver_name": sa.get("name") or "", "phone": norm_phone(sa.get("tel1")), "zip": norm_zip(sa.get("zipCode")),
+        "contact_phone": norm_phone(sa.get("tel1") or sa.get("tel2")),
         "address": " ".join(x for x in (sa.get("baseAddress"), sa.get("detailedAddress")) if x),
         "pccc": norm_pccc(po.get("individualCustomUniqueCode")), "otp": None, "raw": item,
     }]
@@ -102,7 +104,9 @@ def parse_coupang(box: dict) -> list[dict]:
             "seller_code": oi.get("externalVendorSkuCode") or None,
             "market_product_id": str(oi.get("sellerProductId") or "") or None, "market_option_id": str(oi.get("vendorItemId") or "") or None,
             "quantity": int(oi.get("shippingCount") or 1), "unit_price": _money(oi.get("salesPrice")), "total_price": _money(oi.get("orderPrice")),
+            # phone = 통관용 (구매자가 통관 정보로 넣은 번호) · contact_phone = 쿠팡 연락처 (실번호 없으면 안심번호)
             "receiver_name": rc.get("name") or "", "phone": norm_phone(ov.get("ordererPhoneNumber")), "zip": norm_zip(rc.get("postCode")),
+            "contact_phone": norm_phone(rc.get("receiverNumber") or rc.get("safeNumber")),
             "address": " ".join(x for x in (rc.get("addr1"), rc.get("addr2")) if x),
             "pccc": pccc, "otp": ov.get("otpNumber") or None, "raw": box,
         })
@@ -218,7 +222,8 @@ async def upsert_line(line: dict, actor: dict, run) -> str:
                                    "market_option_id", "quantity", "unit_price", "total_price", "receiver_name")}
     fields.update(receiver_zip=line["zip"] or None, receiver_hash=fp, last_synced_at=datetime.now(timezone.utc),
                   raw_enc=_enc(json.dumps(line["raw"], ensure_ascii=False, default=str)))
-    secret = {"receiver_phone_enc": _enc(line["phone"]), "receiver_address_enc": _enc(line["address"]), "pccc_enc": _enc(line["pccc"])}
+    secret = {"receiver_phone_enc": _enc(line["phone"]), "contact_phone_enc": _enc(line.get("contact_phone")),
+              "receiver_address_enc": _enc(line["address"]), "pccc_enc": _enc(line["pccc"])}
     m = MARKET_LABEL[line["market"]]
     o = await MarketOrder.get_or_none(market=line["market"], line_no=line["line_no"])
 
@@ -332,7 +337,7 @@ def _short_address(addr: str) -> str:
 
 
 def order_dict(o: MarketOrder) -> dict:
-    phone, pccc = _dec(o.receiver_phone_enc), _dec(o.pccc_enc)
+    phone, pccc, contact = _dec(o.receiver_phone_enc), _dec(o.pccc_enc), _dec(o.contact_phone_enc)
     from services.order.pccc import mask_pccc
     return {
         "id": o.id, "code": o.code, "market": o.market, "line_no": o.line_no, "order_no": o.order_no, "ship_unit_no": o.ship_unit_no,
@@ -342,11 +347,21 @@ def order_dict(o: MarketOrder) -> dict:
         "market_product_id": o.market_product_id, "market_option_id": o.market_option_id,
         "quantity": o.quantity, "unit_price": o.unit_price, "total_price": o.total_price,
         "receiver": {"name": mask_name(o.receiver_name or ""), "phone": mask_phone(phone) if phone else None,
+                     "contact_phone": mask_phone(contact) if contact else None,
                      "zip": o.receiver_zip, "address": _short_address(_dec(o.receiver_address_enc)) or None,
                      "pccc": mask_pccc(pccc) if pccc else None},
         "pccc_status": o.pccc_status, "pccc_message": o.pccc_message,
         "pccc_checked_at": _fmt(o.pccc_checked_at), "pccc_valid_to": o.pccc_valid_to.isoformat() if o.pccc_valid_to else None,
         "last_synced_at": _fmt(o.last_synced_at), "created_at": o.created_at.isoformat(),
+    }
+
+
+def receiver_full(o: MarketOrder) -> dict:
+    """주문 상세 전용 — 타오바오 주문·배송에 쓸 수취인 원본. 목록에는 넣지 않는다.
+    customs_phone(통관용) · contact_phone(쇼핑몰 연락처) 은 덮어쓰지 않고 따로 준다."""
+    return {
+        "name": o.receiver_name or "", "zip": o.receiver_zip or "", "address": _dec(o.receiver_address_enc),
+        "customs_phone": _dec(o.receiver_phone_enc), "contact_phone": _dec(o.contact_phone_enc), "pccc": _dec(o.pccc_enc),
     }
 
 
@@ -384,7 +399,8 @@ class OrderService:
             raise HTTPException(status_code=404, detail="주문을 찾지 못했습니다.")
         events = await OrderEvent.filter(order_id=o.id).order_by("-id").prefetch_related("actor_user")
         raw = json.loads(_dec(o.raw_enc) or "null")
-        return {"order": order_dict(o), "events": [event_dict(e) for e in events], "raw_masked": mask_raw(raw)}
+        return {"order": order_dict(o), "events": [event_dict(e) for e in events], "raw_masked": mask_raw(raw),
+                "receiver_full": receiver_full(o)}
 
     @staticmethod
     async def recheck(order_id: int, auth: dict) -> dict:

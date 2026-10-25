@@ -30,7 +30,8 @@ class MarketOrder(BaseModel):
     total_price = fields.IntField(null=True)                        # 고객 결제 금액 (원)
 
     receiver_name = fields.CharField(max_length=100, null=True)
-    receiver_phone_enc = fields.TextField(null=True)                # 통관용 전화번호 (쿠팡 overseaShippingInfoDto.ordererPhoneNumber · 네이버 shippingAddress.tel1)
+    receiver_phone_enc = fields.TextField(null=True)                # 통관용 전화번호 (쿠팡 overseaShippingInfoDto.ordererPhoneNumber · 네이버 shippingAddress.tel1) — 통관부호 검증에 씀
+    contact_phone_enc = fields.TextField(null=True)                 # 쇼핑몰 연락처 (쿠팡 receiver.receiverNumber → 없으면 안심번호 safeNumber · 네이버 tel1) — 통관용과 따로 둔다
     receiver_zip = fields.CharField(max_length=10, null=True)
     receiver_address_enc = fields.TextField(null=True)
     pccc_enc = fields.TextField(null=True)                          # 개인통관고유부호 (P…) 또는 일회용 부호 (O…)
