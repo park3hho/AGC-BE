@@ -16,6 +16,7 @@ def product_dict(p) -> dict:
         "id": p.id,
         "code": p.code,
         "photo_url": p.photo_url,
+        "photos": p.photos or [],
         "title_cn": p.title_cn,
         "title_ko": p.title_ko,
         "created_at": p.created_at.isoformat(),

@@ -109,9 +109,11 @@ async def _latest_options(product_id: int) -> list[PriceSurveyOption]:
 
 
 def _photos(p: Product, options: list[PriceSurveyOption]) -> list[dict]:
-    """고를 수 있는 사진 — 대표 사진 + 최근 조사 옵션별 사진 (같은 파일은 한 번)."""
+    """고를 수 있는 사진 — 대표 사진 + 추가 사진(갤러리) + 최근 조사 옵션별 사진 (같은 파일은 한 번)."""
     photos, seen = [], set()
     for url, label in [(p.photo_url, "대표")] + [
+        (u, f"추가 {i}") for i, u in enumerate(p.photos or [], 1)
+    ] + [
         (o.photo_url, " · ".join(x for x in (o.option1, o.option2) if x)) for o in options
     ]:
         if url and url not in seen:

@@ -257,6 +257,7 @@ product (제품) 1 ──< N price_survey (가격 조사) 1 ──< N price_surv
 |---|---|---|---|
 | `code` | varchar(50), unique | ✅ | 제품 코드 — BE 발급 `PR-YYMMDD-XXXX` (추가일 KST, 순번 16진수 4자리) |
 | `photo_url` | varchar(1000) | | 제품 사진 — `/files/...` (업로드, 이 PC 디스크) 또는 외부 `http(s)` 주소 |
+| `photos` | JSONB | | 추가 사진 갤러리 — 주소 목록(순서 있음, 최대 10장, 대표 제외). 판매 상세에 쓸 사진을 모아 둔다 (사진 5장 기준, 2026-10-25 사용자 결정). 마이그레이션 20 |
 | `title_cn` | varchar(300) | ✅ | 중국어 제목 |
 | `title_ko` | varchar(300) | | 한국어 제목 |
 | `created_at` | timestamptz | ✅ | 제품 코드 추가일 (자동) |

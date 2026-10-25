@@ -1,5 +1,7 @@
 from typing import Optional
 
+PHOTOS_MAX = 10  # 제품 추가 사진(갤러리) 최대 장수
+
 from pydantic import BaseModel, Field, field_validator
 
 from schemas.common import check_photo_url, clean_str
@@ -10,6 +12,7 @@ class ProductCreate(BaseModel):
     photo_url: Optional[str] = Field(default=None, max_length=1000)
     title_cn: str = Field(max_length=300)
     title_ko: Optional[str] = Field(default=None, max_length=300)
+    photos: Optional[list[str]] = None  # 추가 사진 (대표 사진 제외), 최대 PHOTOS_MAX
 
     @field_validator("title_cn")
     @classmethod
@@ -30,12 +33,19 @@ class ProductCreate(BaseModel):
         return check_photo_url(v)
 
 
+    @field_validator("photos")
+    @classmethod
+    def validate_photos(cls, v):
+        return check_photos(v)
+
+
 class ProductUpdate(BaseModel):
     """보낸 필드만 바꾼다 (model_dump(exclude_unset=True)). 코드·추가일은 바꿀 수 없다."""
 
     photo_url: Optional[str] = Field(default=None, max_length=1000)
     title_cn: Optional[str] = Field(default=None, max_length=300)
     title_ko: Optional[str] = Field(default=None, max_length=300)
+    photos: Optional[list[str]] = None  # 보내면 목록 전체 교체 · [] 이면 비움
 
     @field_validator("title_cn")
     @classmethod
@@ -54,3 +64,22 @@ class ProductUpdate(BaseModel):
     @classmethod
     def validate_photo_url(cls, v):
         return check_photo_url(v)
+
+    @field_validator("photos")
+    @classmethod
+    def validate_photos(cls, v):
+        return check_photos(v)
+
+
+def check_photos(v):
+    """추가 사진 목록 — 각 주소는 photo_url 과 같은 규칙, 같은 주소는 한 번, 최대 PHOTOS_MAX 장."""
+    if v is None:
+        return None
+    out = []
+    for url in v:
+        url = check_photo_url(url)
+        if url and url not in out:
+            out.append(url)
+    if len(out) > PHOTOS_MAX:
+        raise ValueError(f"추가 사진은 최대 {PHOTOS_MAX}장입니다.")
+    return out
