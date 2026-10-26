@@ -1,5 +1,6 @@
 """상세페이지(디자인) — 템플릿 채우기 · 저장 · 검수(휴먼 체크) · 공통 안내. BE DESIGN.md §6.4"""
 
+import re
 from datetime import datetime, timezone
 from typing import Optional
 
@@ -44,6 +45,59 @@ def count_markers(value) -> int:
     if isinstance(value, (list, tuple)):
         return sum(count_markers(v) for v in value)
     return 0
+
+
+# 사람이 읽는 칸 이름 — 남은 확인 표시 목록에 쓴다
+_SECTION_LABEL = {"hero": "S1 첫 화면", "points": "S2 포인트", "flavors": "S3 구성", "info": "S4 제품 정보",
+                  "howto": "S5 이렇게 즐겨요", "notice": "S6 안내", "notice_title": "S6 제목", "seller": "S6 판매자"}
+
+
+def _spots(value, path: str) -> list[dict]:
+    out: list[dict] = []
+    if isinstance(value, str):
+        out += [{"path": path, "text": m.group(0)} for m in MARKER_RE.finditer(value)]
+    elif isinstance(value, dict):
+        for k, v in value.items():
+            out += _spots(v, f"{path}.{k}" if path else k)
+    elif isinstance(value, (list, tuple)):
+        for i, v in enumerate(value):
+            # 제품 정보 줄은 라벨로 부른다 (rows[원재료])
+            label = v.get("label") if isinstance(v, dict) and isinstance(v.get("label"), str) else None
+            out += _spots(v, f"{path}[{label or i + 1}]")
+    return out
+
+
+def marker_spots(value) -> list[dict]:
+    """[[...]] 확인 표시가 남은 자리 — [{path, where, text}]. where 는 사람이 읽는 위치 ("S4 제품 정보 rows[원재료]")."""
+    return [{**s, "where": _where(s["path"])} for s in _spots(value, "")]
+
+
+def _where(path: str) -> str:
+    """"info.rows[원재료].value" → "S4 제품 정보 · 원재료"."""
+    tokens = re.findall(r"([^.\[\]]+)|\[([^\]]+)\]", path)
+    head = tokens[0][0] if tokens else path
+    parts: list[str] = []
+    for key, idx in tokens[1:]:
+        if key and key != "value":
+            parts.append(key)
+        elif idx:
+            if idx.isdigit() and parts:
+                parts[-1] = f"{parts[-1]} {idx}"      # badges[2] → "badges 2"
+            elif not idx.isdigit():
+                parts = [p for p in parts if p != "rows"] + [idx]   # rows[원재료] → "원재료"
+    return " · ".join([_SECTION_LABEL.get(head, head), *parts])
+
+
+def _markers_block(content: dict, common_payload: dict, action: str) -> None:
+    """확인 표시가 남아 있으면 409 — 고객용 이미지에 노란 표시가 그대로 찍히는 걸 막는다 (2026-10-26 사용자 요청)."""
+    spots = marker_spots(content) + marker_spots({k: v for k, v in common_payload.items() if k != "reg_no"})
+    if spots:
+        listed = ", ".join(f"{s['where']} {s['text']}" for s in spots[:8])
+        more = f" 외 {len(spots) - 8}칸" if len(spots) > 8 else ""
+        raise HTTPException(
+            status_code=409,
+            detail=f"확인 표시 [[...]]가 {len(spots)}칸 남아 있어 {action} 수 없습니다: {listed}{more}",
+        )
 
 
 def reg_no_ready(reg_no: str) -> bool:
@@ -221,6 +275,7 @@ async def _page_dict(dp: DetailPage) -> dict:
         "content": dp.content,
         "review_checks": dp.review_checks or [],
         "marker_count": count_markers(dp.content),
+        "markers": marker_spots(dp.content),   # 남은 확인 표시 자리 [{path, where, text}]
         "content_hash": c_hash,                              # 내보내기 때 그린 시점 확인용 (content + 공통 안내)
         "exports": await exports.latest_exports(dp.id, c_hash),
         "reviews": [
@@ -337,14 +392,16 @@ class DetailPageService:
     @staticmethod
     async def approve(product_id: int, body: DetailPageApprove, user_id: int) -> dict:
         """휴먼 체크 = 사람이 미리보기를 보고 "확인" 한 번 (2026-10-22 사용자 결정 — 체크리스트 없음).
-        초안 · 검수 대기 · 수정 필요 어디서든 바로 승인한다. 등록번호 · 확인 표시([[...]])는 막지 않고
-        FE 에서 경고만 보여준다."""
+        초안 · 검수 대기 · 수정 필요 어디서든 바로 승인한다. 등록번호는 경고만 (FE).
+        확인 표시([[...]])가 내용 · 공통 안내에 남아 있으면 409 (2026-10-26 사용자 요청 — 10-22 에 풀었던 조건을 다시 건다).
+        이미 승인된 페이지 상태는 건드리지 않는다 (내보내기에서 막힌다)."""
         async with in_transaction() as conn:
             dp = await DetailPage.filter(product_id=product_id).using_db(conn).select_for_update().first()
             if dp is None:
                 await _get_page(product_id)      # 404 메시지
             if dp.status == DetailStatus.APPROVED:
                 raise HTTPException(status_code=400, detail="이미 확인(승인)된 상세페이지입니다.")
+            _markers_block(dp.content, _common_payload(await _get_common()), "확인(승인)할")
             dp.status = DetailStatus.APPROVED
             dp.reviewed_by_id = user_id
             dp.reviewed_at = datetime.now(timezone.utc)
@@ -378,7 +435,9 @@ class DetailPageService:
         p = await _get_product(product_id)
         dp = await _get_page(product_id)
         exports.require_approved(dp)
-        now_hash = exports.content_hash(dp.content, _common_payload(await _get_common()))
+        common_payload = _common_payload(await _get_common())
+        _markers_block(dp.content, common_payload, "이미지로 내보낼")
+        now_hash = exports.content_hash(dp.content, common_payload)
         if c_hash != now_hash:
             raise HTTPException(status_code=409, detail="그린 뒤 상세페이지가 바뀌었습니다. 다시 불러와 내보내주세요.")
         meta = exports.check_slices(platform, blobs)
