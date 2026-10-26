@@ -30,20 +30,33 @@ server {
     client_max_body_size 50m;       # 상세 이미지 조각 합계 45MB(네이버 PNG 무손실) + 여유 · 사진 업로드 10MB
 
     # MKT BE (C:\Users\iwill\MKT\BE, 컨테이너 mkt_app) — 같은 PC · 같은 인증서로 /mkt/ 아래를 넘긴다 (2026-10-26).
-    #   이름은 요청 때 찾는다(resolver) → MKT 가 꺼져 있어도 AGC nginx 는 뜨고, /mkt/ 만 502.
+    #   이름은 요청 때 찾는다(resolver = Docker 내장 DNS) → MKT 가 꺼져 있어도 AGC nginx 는 뜨고, /mkt/ 만 503 JSON.
+    #   MKT compose 서비스 이름은 mkt_app · mkt_db — be_default 에서 AGC 의 app · db 와 이름이 겹치지 않게 (MKT BE docker-compose.yml).
+    location = /mkt {
+        return 301 /mkt/;
+    }
     location /mkt/ {
         resolver 127.0.0.11 valid=30s ipv6=off;
         set $mkt_upstream http://mkt_app:8000;
-        rewrite ^/mkt/(.*)$ /$1 break;
+        rewrite ^/mkt/(.*)$ /$1 break;          # /mkt/health?x=1 → /health?x=1 (쿼리는 그대로)
         proxy_pass $mkt_upstream;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_connect_timeout 5s;               # 꺼져 있으면 오래 기다리지 않고 바로 알린다
+        proxy_read_timeout 60s;
+        # nginx 가 만든 502·504(MKT 꺼짐·응답 없음)만 바꾼다. MKT 가 직접 낸 4xx·5xx 는 그대로 (proxy_intercept_errors off)
+        error_page 502 504 = @mkt_down;
+    }
+    location @mkt_down {
+        default_type "application/json; charset=utf-8";
+        return 503 '{"detail":"MKT 서버가 꺼져 있어요"}';
     }
 
     location / {
-        # 'app' 은 같은 네트워크(be_default)의 MKT 컨테이너(mkt_app)도 서비스 이름으로 갖고 있어 둘로 나뉘어 간다 → 컨테이너 이름으로 고정
+        # 'app' 은 같은 네트워크(be_default)의 MKT 컨테이너도 서비스 이름으로 갖고 있어 둘로 나뉘어 갔다 → 컨테이너 이름으로 고정.
+        #   (2026-10-26 MKT 서비스 이름을 mkt_app 으로 바꿔 원인은 없어졌지만, 다른 서비스가 붙어도 안전하게 고정은 유지)
         proxy_pass http://agc_app:8000;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
