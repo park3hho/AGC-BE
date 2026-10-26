@@ -223,12 +223,14 @@ def build_template(p: Product, options: list[PriceSurveyOption]) -> dict:
             "title": "제품 정보",
             "rows": [
                 {"label": "제품명", "value": f"{name} ({p.title_cn})" if p.title_ko else p.title_cn},
-                {"label": "브랜드 · 제조사", "value": "[[제조사]]"},
+                # 제품에 저장된 정보(리서치 때 찾은 값)가 있으면 그대로 쓰고, 없을 때만 [[...]] 확인 표시를 남긴다
+                {"label": "브랜드 · 제조사", "value": p.manufacturer or "[[제조사]]"},
                 {"label": "원산지", "value": "중국"},
                 {"label": "용량 · 수량", "value": size_text},
-                {"label": "원재료", "value": "[[실제 라벨 기준 원재료]]"},
-                {"label": "소비기한", "value": "제품 라벨 별도 표기일까지"},
-                {"label": "보관 방법", "value": "직사광선을 피해 서늘한 곳에 보관, 개봉 후 냉장 보관"},
+                {"label": "원재료", "value": p.ingredients or "[[실제 라벨 기준 원재료]]"},
+                *([{"label": "알레르기", "value": f"{p.allergens} 함유"}] if p.allergens else []),
+                {"label": "소비기한", "value": f"제조일로부터 {p.shelf_life}" if p.shelf_life else "제품 라벨 별도 표기일까지"},
+                {"label": "보관 방법", "value": p.storage or "직사광선을 피해 서늘한 곳에 보관, 개봉 후 냉장 보관"},
             ],
             "nutrition": [],
             "note": "",

@@ -32,6 +32,7 @@ class PriceSurveyOption(BaseModel):
     option2 = fields.CharField(max_length=200, null=True)          # 옵션2 (없는 상품도 있음)
     price_cny = fields.DecimalField(max_digits=12, decimal_places=2)  # 옵션별 가격 (위안)
     photo_url = fields.CharField(max_length=1000, null=True)      # 옵션별 사진 (예: 맛별 사진)
+    barcode = fields.CharField(max_length=20, null=True)          # 바코드 (GTIN, 숫자 8~14자리, 중국 상품은 보통 69로 시작) — 쿠팡 공식 브랜드 등록에 필요
 
     class Meta:
         table = "price_survey_option"

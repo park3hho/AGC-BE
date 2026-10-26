@@ -12,6 +12,7 @@ class PriceSurveyOptionIn(BaseModel):
     option2: Optional[str] = Field(default=None, max_length=200)
     price_cny: Decimal = Field(gt=0, max_digits=12, decimal_places=2)
     photo_url: Optional[str] = Field(default=None, max_length=1000)     # 옵션별 사진 (예: 맛별 사진)
+    barcode: Optional[str] = Field(default=None, max_length=20)          # 바코드 (GTIN 숫자 8~14자리), 모르면 비움
 
     @field_validator("option1")
     @classmethod
@@ -20,6 +21,11 @@ class PriceSurveyOptionIn(BaseModel):
         if not v:
             raise ValueError("옵션1을 입력해주세요.")
         return v
+
+    @field_validator("barcode")
+    @classmethod
+    def validate_barcode(cls, v):
+        return check_barcode(v)
 
     @field_validator("option2")
     @classmethod
@@ -133,6 +139,7 @@ class PriceSurveyOptionPatch(BaseModel):
     option1: Optional[str] = Field(default=None, max_length=200)
     option2: Optional[str] = Field(default=None, max_length=200)
     photo_url: Optional[str] = Field(default=None, max_length=1000)
+    barcode: Optional[str] = Field(default=None, max_length=20)          # "" 나 null 이면 비움
 
     @field_validator("option1")
     @classmethod
@@ -141,6 +148,11 @@ class PriceSurveyOptionPatch(BaseModel):
         if not v:
             raise ValueError("옵션1은 비울 수 없습니다.")
         return v
+
+    @field_validator("barcode")
+    @classmethod
+    def validate_barcode(cls, v):
+        return check_barcode(v)
 
     @field_validator("option2")
     @classmethod
@@ -151,3 +163,14 @@ class PriceSurveyOptionPatch(BaseModel):
     @classmethod
     def validate_photo_url(cls, v):
         return check_photo_url(v)
+
+
+def check_barcode(v: Optional[str]) -> Optional[str]:
+    """바코드(GTIN) — 공백·하이픈은 지우고 숫자 8~14자리만 받는다. 빈 값은 None."""
+    v = clean_str(v)
+    if v is None:
+        return None
+    v = v.replace(" ", "").replace("-", "")
+    if not v.isdigit() or not 8 <= len(v) <= 14:
+        raise ValueError("바코드는 숫자 8~14자리로 입력해주세요.")
+    return v

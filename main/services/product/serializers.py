@@ -19,6 +19,11 @@ def product_dict(p) -> dict:
         "photos": p.photos or [],
         "title_cn": p.title_cn,
         "title_ko": p.title_ko,
+        "manufacturer": p.manufacturer,
+        "ingredients": p.ingredients,
+        "allergens": p.allergens,
+        "shelf_life": p.shelf_life,
+        "storage": p.storage,
         "created_at": p.created_at.isoformat(),
         "updated_at": p.updated_at.isoformat(),
     }
@@ -58,7 +63,7 @@ def survey_detail_dict(s, options) -> dict:
         "options": [
             {
                 "id": o.id, "option1": o.option1, "option2": o.option2,
-                "price_cny": money_cny(o.price_cny), "photo_url": o.photo_url,
+                "price_cny": money_cny(o.price_cny), "photo_url": o.photo_url, "barcode": o.barcode,
             }
             for o in options
         ],

@@ -13,6 +13,17 @@ class ProductCreate(BaseModel):
     title_cn: str = Field(max_length=300)
     title_ko: Optional[str] = Field(default=None, max_length=300)
     photos: Optional[list[str]] = None  # 추가 사진 (대표 사진 제외), 최대 PHOTOS_MAX
+    # 제품 정보 (리서치 때 함께 찾는다) — 비워도 된다
+    manufacturer: Optional[str] = Field(default=None, max_length=300)
+    ingredients: Optional[str] = Field(default=None, max_length=5000)
+    allergens: Optional[str] = Field(default=None, max_length=300)
+    shelf_life: Optional[str] = Field(default=None, max_length=100)
+    storage: Optional[str] = Field(default=None, max_length=300)
+
+    @field_validator("manufacturer", "ingredients", "allergens", "shelf_life", "storage")
+    @classmethod
+    def validate_info(cls, v):
+        return clean_str(v)
 
     @field_validator("title_cn")
     @classmethod
@@ -46,6 +57,17 @@ class ProductUpdate(BaseModel):
     title_cn: Optional[str] = Field(default=None, max_length=300)
     title_ko: Optional[str] = Field(default=None, max_length=300)
     photos: Optional[list[str]] = None  # 보내면 목록 전체 교체 · [] 이면 비움
+    # 제품 정보 — 보낸 것만 바꾼다, "" 나 null 이면 비움
+    manufacturer: Optional[str] = Field(default=None, max_length=300)
+    ingredients: Optional[str] = Field(default=None, max_length=5000)
+    allergens: Optional[str] = Field(default=None, max_length=300)
+    shelf_life: Optional[str] = Field(default=None, max_length=100)
+    storage: Optional[str] = Field(default=None, max_length=300)
+
+    @field_validator("manufacturer", "ingredients", "allergens", "shelf_life", "storage")
+    @classmethod
+    def validate_info(cls, v):
+        return clean_str(v)
 
     @field_validator("title_cn")
     @classmethod
