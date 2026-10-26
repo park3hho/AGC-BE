@@ -533,14 +533,24 @@ docker compose logs -f app
 ### 7.1 HTTPS (nginx + certbot)
 
 ```
-브라우저 → eido-agc.vercel.app/api/* (예전 주소 agc-fe.vercel.app 도 같이 연결) ─(Vercel rewrite)→ https://BE_DOMAIN/* → nginx:443 → agc_app:8000
+브라우저 → eido-agc.vercel.app/api/* (예전 주소 agc-fe.vercel.app 도 같이 연결) ─(Vercel rewrite)→ https://BE_DOMAIN/* → nginx:443 → agc_app:8000   (2026-10-27 까지. 지금은 아래 Cloudflare Tunnel)
 ```
 - FE 는 `/api` 를 같은 출처로 부르고 Vercel 이 BE 로 넘긴다 → 브라우저 입장에선 쿠키가 vercel.app 것이라 CORS·제3자 쿠키 차단 문제가 없다.
 - nginx(`nginx/start.sh`)는 인증서가 있으면 `https.conf.template`, 없으면 발급 확인만 받는 `http.conf.template` 를 쓴다. 1시간마다 다시 골라 reload → 첫 발급·갱신이 재시작 없이 반영된다.
 - 인증서 없이는 API 를 열지 않는다 (80 은 `/.well-known/acme-challenge/` 외 503) — 비밀번호가 평문으로 오가지 않게.
 - 8000·5432 는 `127.0.0.1` 에만 연다. 외부에서 들어오는 길은 nginx 뿐 → uvicorn `--proxy-headers` 로 실제 접속 IP 를 써도 위조할 수 없다.
 
-**처음 켜기 (1회)**
+**Cloudflare Tunnel (2026-10-27~, 지금 쓰는 길)**
+```
+브라우저 → eido-agc.vercel.app/api/* ─(Vercel rewrite)→ https://api.eidofood.com/* → Cloudflare → agc_cloudflared(밖으로 나가는 연결) → https://agc_nginx:443 → agc_app:8000 (/mkt/ → mkt_app:8000)
+```
+- 도메인 `eidofood.com` (Cloudflare Registrar, 2027-10-27 만료·자동 갱신). Tunnel 이름 `eido-home` (ID `54cda0f1-b339-464f-8ced-2f122f75a850`).
+- 호스트 이름 → 서비스 연결은 Cloudflare 대시보드(Networking › Tunnels › eido-home › Routes)에서 관리. `api.eidofood.com` → `https://agc_nginx:443`, "Disable TLS certificate verification" 켬 (nginx 인증서가 IP 용이라 — 이 구간은 이 PC 안 Docker 네트워크).
+- 토큰은 `.env` 의 `CF_TUNNEL_TOKEN` (커밋 금지). 새어 나가면 대시보드에서 Rotate token → `.env` 갱신 → `docker compose up -d cloudflared`.
+- 실제 접속 IP: cloudflared 가 X-Forwarded-For 를 넘기고 nginx·uvicorn 이 그대로 이어받는다 (확인함).
+- 아래 "공인 IP 직접" 방식(80·443 포트포워딩)은 아직 열려 있다. 마켓 상세 이미지 주소가 IP 를 쓰는지 확인하고 옮긴 뒤 공유기 포트를 닫는다.
+
+**처음 켜기 (1회, 공인 IP 직접 방식)**
 1. 공유기(ipTIME, `192.168.0.1`) NAT/라우터 관리 → 포트포워드: TCP 80·443 → 이 PC 내부 IP (`192.168.0.5`, DHCP 고정 할당 권장). 도메인을 쓰면 A 레코드 → 공인 IP.
 2. `.env` 에 `BE_DOMAIN=<공인IP 또는 도메인>`, `ENV=production`, `ENABLE_DOCS=` (비움 — 외부에 API 문서 노출 금지), `SESSION_SAME_SITE=lax`.
 3. `docker compose up -d` (nginx 가 http 설정으로 뜬다)

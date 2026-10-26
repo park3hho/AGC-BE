@@ -73,6 +73,20 @@ services:
     entrypoint: ["/bin/sh", "-c", "trap exit TERM; while :; do certbot renew --webroot -w /var/www/certbot --quiet; sleep 12h & wait $${!}; done"]
     restart: always
 
+  # Cloudflare Tunnel (2026-10-27) — 밖에서 들어오는 포트 없이 api.eidofood.com → agc_nginx:443 로 연결.
+  #   경로(호스트 이름 → 서비스)는 Cloudflare 대시보드(Networking › Tunnels › eido-home)에서 관리. 토큰은 .env 의 CF_TUNNEL_TOKEN.
+  #   nginx 인증서는 IP 용이라 Cloudflare 쪽에서 "No TLS Verify" 로 붙는다 (이 PC 안 Docker 네트워크 구간만).
+  cloudflared:
+    image: cloudflare/cloudflared:2025.10.0
+    container_name: agc_cloudflared
+    command: tunnel --no-autoupdate run
+    environment:
+      - TUNNEL_TOKEN=${CF_TUNNEL_TOKEN}
+      - TZ=Asia/Seoul
+    depends_on:
+      - nginx
+    restart: always
+
 volumes:
   postgres_data:
   letsencrypt:      # 인증서·계정키 (백업 대상)
