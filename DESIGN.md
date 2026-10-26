@@ -533,7 +533,7 @@ docker compose logs -f app
 ### 7.1 HTTPS (nginx + certbot)
 
 ```
-브라우저 → agc-fe.vercel.app/api/* ─(Vercel rewrite)→ https://BE_DOMAIN/* → nginx:443 → app:8000
+브라우저 → eido-agc.vercel.app/api/* (예전 주소 agc-fe.vercel.app 도 같이 연결) ─(Vercel rewrite)→ https://BE_DOMAIN/* → nginx:443 → agc_app:8000
 ```
 - FE 는 `/api` 를 같은 출처로 부르고 Vercel 이 BE 로 넘긴다 → 브라우저 입장에선 쿠키가 vercel.app 것이라 CORS·제3자 쿠키 차단 문제가 없다.
 - nginx(`nginx/start.sh`)는 인증서가 있으면 `https.conf.template`, 없으면 발급 확인만 받는 `http.conf.template` 를 쓴다. 1시간마다 다시 골라 reload → 첫 발급·갱신이 재시작 없이 반영된다.
