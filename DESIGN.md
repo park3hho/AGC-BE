@@ -286,6 +286,7 @@ product (제품) 1 ──< N price_survey (가격 조사) 1 ──< N price_surv
 
 - **옵션 총 종류**는 컬럼으로 두지 않고 `price_survey_option` 행 수로 센다 — 따로 저장하면 실제 옵션 수와 어긋난다.
 - 한 제품을 여러 날 다시 조사할 수 있도록 제품 : 조사 = 1 : N.
+- ⚠️ **옵션 id 는 판매가와 마켓 등록의 열쇠다.** `option_price.option_id` 는 CASCADE, `product_pricing.base_option_id` 는 SET NULL, 마켓 등록 `items[].option_id` 는 값으로 참조한다. `PATCH /price-surveys/{id}` 에 `options` 를 보내면 행을 지우고 새 id 로 만들어 이 연결이 모두 끊긴다 (2026-10-25 사고). 이름·사진 수정은 `PATCH /price-surveys/{id}/options/{option_id}` (제자리 수정, id·`price_cny` 유지) 를 쓴다. (2026-10-26)
 - **소프트 삭제**: `DELETE` 는 `deleted_at` 만 채운다. 조회는 `alive_products()` · `alive_surveys()` (제품이 삭제된 조사도 숨김)로만 한다. 코드 발급(`next_code`)은 삭제된 행까지 봐서 코드를 다시 쓰지 않는다.
 - **사진 주소로 저장** (`POST /uploads/photos/from-url`): BE 가 받아 온다 → 연결 전 호스트를 IP 로 풀어 공인 주소만 허용, 리다이렉트는 직접 따라가며 매번 다시 검사 (최대 3번), 15초 · 10MB 제한. 표준 라이브러리 `urllib` 만 쓴다 (의존성 추가 없음).
 

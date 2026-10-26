@@ -7,7 +7,7 @@ from tortoise.transactions import in_transaction
 
 from models.product.price_survey import PriceSurvey, PriceSurveyOption
 from models.product.product import Product
-from schemas.price_survey import PriceSurveyCreate, PriceSurveyUpdate
+from schemas.price_survey import PriceSurveyCreate, PriceSurveyOptionPatch, PriceSurveyUpdate
 from services.product.serializers import survey_detail_dict, survey_summary_dict
 from utils.code_gen import CODE_ISSUE_RETRIES, SURVEY_CODE_PREFIX, next_code
 
@@ -100,6 +100,25 @@ class PriceSurveyService:
                     [PriceSurveyOption(survey_id=s.id, **o.model_dump()) for o in body.options],
                     using_db=conn,
                 )
+        return await PriceSurveyService.get(s.id)
+
+    @staticmethod
+    async def patch_option(survey_id: int, option_id: int, body: PriceSurveyOptionPatch) -> dict:
+        """옵션 1개를 제자리에서 수정 — id·price_cny 는 그대로라 저장된 판매가와 마켓 등록 연결이 유지된다."""
+        data = body.model_dump(exclude_unset=True)
+        if not data:
+            raise HTTPException(status_code=400, detail="바꿀 내용이 없습니다.")
+        s = await _get_alive(survey_id)
+        opt = await PriceSurveyOption.get_or_none(id=option_id, survey_id=s.id)
+        if not opt:
+            raise HTTPException(status_code=404, detail="옵션을 찾을 수 없습니다.")
+        new_key = (data.get("option1", opt.option1), data.get("option2", opt.option2))
+        dup = await PriceSurveyOption.filter(
+            survey_id=s.id, option1=new_key[0], option2=new_key[1]
+        ).exclude(id=opt.id).exists()
+        if dup:
+            raise HTTPException(status_code=409, detail=f"같은 옵션이 이미 있습니다: {new_key[0]} / {new_key[1] or '-'}")
+        await opt.update_from_dict(data).save(update_fields=[*data.keys(), "updated_at"])
         return await PriceSurveyService.get(s.id)
 
     @staticmethod

@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from core.auth_deps import require_auth, require_feature
 from core.permissions import Feature
 from core.response_utils import success, success_only
-from schemas.price_survey import PriceSurveyCreate, PriceSurveyUpdate
+from schemas.price_survey import PriceSurveyCreate, PriceSurveyOptionPatch, PriceSurveyUpdate
 from services.product.price_survey_service import PriceSurveyService
 
 logger = logging.getLogger(__name__)
@@ -71,6 +71,20 @@ async def update_price_survey(survey_id: int, body: PriceSurveyUpdate, auth=Depe
         raise
     except Exception as e:
         logger.error(f"가격 조사 수정 실패: {e}")
+        raise HTTPException(status_code=500, detail="처리 중 오류가 발생했습니다.")
+
+
+@router.patch("/{survey_id}/options/{option_id}")
+async def patch_price_survey_option(
+    survey_id: int, option_id: int, body: PriceSurveyOptionPatch, auth=Depends(require_feature(Feature.RESEARCH))
+):
+    """옵션 이름·사진만 제자리 수정 (id 유지 → 판매가·마켓 등록 연결 보존). 가격은 여기서 못 바꾼다."""
+    try:
+        return success(price_survey=await PriceSurveyService.patch_option(survey_id, option_id, body))
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"가격 조사 옵션 수정 실패: {e}")
         raise HTTPException(status_code=500, detail="처리 중 오류가 발생했습니다.")
 
 

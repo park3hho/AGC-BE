@@ -87,7 +87,10 @@ def _check_duplicate_options(options) -> None:
 
 class PriceSurveyUpdate(BaseModel):
     """보낸 필드만 바꾼다 (model_dump(exclude_unset=True)).
-    survey_date · product_code 는 조사 코드번호와 묶여 있어 바꿀 수 없다. options 를 보내면 전체 교체."""
+    survey_date · product_code 는 조사 코드번호와 묶여 있어 바꿀 수 없다.
+    ⚠️ options 를 보내면 전체 교체 — 옵션 행을 지우고 새 id 로 다시 만든다. 그 옵션에 저장된 판매가(option_price)가
+    CASCADE 로 지워지고 마켓 등록(listing items.option_id)과도 끊긴다. 이름·사진만 고칠 때는
+    PATCH /price-surveys/{id}/options/{option_id} (PriceSurveyOptionPatch) 를 쓴다."""
 
     photo_url: Optional[str] = Field(default=None, max_length=1000)
     taobao_url: Optional[str] = Field(default=None, max_length=1000)
@@ -122,3 +125,29 @@ class PriceSurveyUpdate(BaseModel):
             raise ValueError("옵션은 비울 수 없습니다.")
         _check_duplicate_options(v)
         return v
+
+class PriceSurveyOptionPatch(BaseModel):
+    """옵션 1개를 그 자리에서 고친다 (id 유지 → 저장된 판매가·마켓 등록 연결이 그대로 남는다).
+    price_cny 는 여기서 바꾸지 않는다 (가격이 바뀌면 판매가 재계산이 필요하므로 별도 작업)."""
+
+    option1: Optional[str] = Field(default=None, max_length=200)
+    option2: Optional[str] = Field(default=None, max_length=200)
+    photo_url: Optional[str] = Field(default=None, max_length=1000)
+
+    @field_validator("option1")
+    @classmethod
+    def validate_option1(cls, v):
+        v = clean_str(v)
+        if not v:
+            raise ValueError("옵션1은 비울 수 없습니다.")
+        return v
+
+    @field_validator("option2")
+    @classmethod
+    def validate_option2(cls, v):
+        return clean_str(v)
+
+    @field_validator("photo_url")
+    @classmethod
+    def validate_photo_url(cls, v):
+        return check_photo_url(v)
