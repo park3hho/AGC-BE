@@ -190,3 +190,28 @@ async def naver_confirm(product_order_ids: list[str]) -> dict:
         for f in d.get("failProductOrderInfos") or []:
             result[str(f.get("productOrderId"))] = (False, str(f.get("message") or f.get("code") or ""))
     return {"result": result, "raw": raws}
+
+
+async def coupang_claims(since: datetime, until: datetime) -> list[dict]:
+    """쿠팡 반품/취소 요청 목록 (분 단위 timeFrame, KST 'yyyy-MM-ddTHH:mm'). 2026-10-27.
+    - 취소: cancelType=CANCEL (status 없이) — 결제완료 단계에서 고객이 바로 취소한 주문 (발주서 목록에선 사라진다)
+    - 반품·출고중지: status=RU(출고중지요청) · UC(반품접수)
+    반환 항목에 _claim(CANCEL · STOP_SHIPPING · RETURN) · _status 를 붙인다. 31일까지 → 7일씩 나눈다."""
+    vendor = await coupang_vendor_id()
+    path = f"/v2/providers/openapi/apis/api/v6/vendors/{vendor}/returnRequests"
+    fmt = lambda d: d.astimezone(KST).strftime("%Y-%m-%dT%H:%M")
+    out: list[dict] = []
+    start = since
+    while until - start > timedelta(minutes=1):
+        end = min(start + timedelta(days=7), until)
+        base = {"searchType": "timeFrame", "createdAtFrom": fmt(start), "createdAtTo": fmt(end)}
+        for claim, extra in (("CANCEL", {"cancelType": "CANCEL"}), ("STOP_SHIPPING", {"status": "RU"}), ("RETURN", {"status": "UC"})):
+            data = await _coupang_get(path, urllib.parse.urlencode({**base, **extra}))
+            if str(data.get("code")) not in ("200", "SUCCESS"):
+                raise MarketApiError(f"쿠팡 반품/취소 {data.get('code')} {str(data.get('message'))[:200]}")
+            for r in data.get("data") or []:
+                r["_claim"], r["_status"] = claim, extra.get("status") or "CANCEL"
+                out.append(r)
+        start = end
+    return out
+

@@ -40,7 +40,24 @@ COUPANG_STAGE = {
     "ACCEPT": "received", "INSTRUCT": "received", "DEPARTURE": "processing", "DELIVERING": "processing",
     "FINAL_DELIVERY": "done", "NONE_TRACKING": "processing",
 }
-TRACKED = ("market_status", "confirmed", "stage", "quantity", "total_price", "product_name", "option_name", "ship_due_at")
+TRACKED = ("market_status", "confirmed", "stage", "quantity", "total_price", "product_name", "option_name", "ship_due_at",
+           "claim_type", "claim_status")
+CLAIM_FIELDS = ("claim_type", "claim_status", "claim_at")
+CLAIM_LABEL = {"CANCEL": "취소", "ADMIN_CANCEL": "취소(관리자)", "RETURN": "반품", "EXCHANGE": "교환",
+               "STOP_SHIPPING": "출고중지 요청", "PURCHASE_DECISION_HOLDBACK": "구매확정 보류"}
+
+
+def run_tag(run) -> dict:
+    """이벤트에 남길 수집 실행 정보 — 자동(poller)·수동 중 무엇으로 들어왔는지."""
+    if not run:
+        return {}
+    return {"run": {"id": run.id, "trigger": run.trigger, "auto": run.trigger == "poller"}}
+
+
+def run_suffix(run) -> str:
+    if not run:
+        return ""
+    return " · 자동 수집" if run.trigger == "poller" else " · 수동 수집"
 
 
 # ------------------------------------------------------------ 마켓 응답 → 한 줄
@@ -65,6 +82,15 @@ def _money(v) -> int | None:
         return None
 
 
+def _naver_claim_at(item: dict, claim_type: str | None) -> datetime | None:
+    """네이버 클레임 접수 시각 — item 의 cancel · return · exchange 묶음 중 클레임 종류에 맞는 것."""
+    if not claim_type:
+        return None
+    key = {"CANCEL": "cancel", "ADMIN_CANCEL": "cancel", "RETURN": "return", "EXCHANGE": "exchange"}.get(claim_type)
+    c = (item.get(key) or {}) if key else {}
+    return _dt(c.get("claimRequestDate") or c.get("requestDate"))
+
+
 def parse_naver(item: dict) -> list[dict]:
     o, po = item.get("order") or {}, item.get("productOrder") or {}
     sa = po.get("shippingAddress") or {}
@@ -84,6 +110,9 @@ def parse_naver(item: dict) -> list[dict]:
         "contact_phone": norm_phone(sa.get("tel1") or sa.get("tel2")),
         "address": " ".join(x for x in (sa.get("baseAddress"), sa.get("detailedAddress")) if x),
         "pccc": norm_pccc(po.get("individualCustomUniqueCode")), "otp": None, "raw": item,
+        # 클레임 — 없으면 빈 문자열이 온다 → None
+        "claim_type": po.get("claimType") or None, "claim_status": po.get("claimStatus") or None,
+        "claim_at": _naver_claim_at(item, po.get("claimType")),
     }]
 
 
@@ -220,6 +249,8 @@ async def upsert_line(line: dict, actor: dict, run) -> str:
     fields = {k: line[k] for k in ("order_no", "ship_unit_no", "market_status", "confirmed", "stage", "ordered_at", "paid_at",
                                    "ship_due_at", "product_name", "option_name", "seller_code", "market_product_id",
                                    "market_option_id", "quantity", "unit_price", "total_price", "receiver_name")}
+    if "claim_type" in line:   # 네이버만 주문 응답에 클레임이 있다 — 쿠팡은 반품/취소 요청 목록으로 따로 (apply_claim)
+        fields.update({k: line.get(k) for k in CLAIM_FIELDS})
     fields.update(receiver_zip=line["zip"] or None, receiver_hash=fp, last_synced_at=datetime.now(timezone.utc),
                   raw_enc=_enc(json.dumps(line["raw"], ensure_ascii=False, default=str)))
     secret = {"receiver_phone_enc": _enc(line["phone"]), "contact_phone_enc": _enc(line.get("contact_phone")),
@@ -230,30 +261,36 @@ async def upsert_line(line: dict, actor: dict, run) -> str:
     if o is None:
         o = await MarketOrder.create(market=line["market"], line_no=line["line_no"], **fields, **secret)
         await issue_code(o, actor, run)
-        await log_event(o, actor, "collected", f"{m} 주문 수집 — {line['product_name'][:60]} ×{line['quantity']} ({line['market_status']})", {
-            "code": o.code, "market": line["market"], "line_no": line["line_no"], "order_no": line["order_no"], "market_status": line["market_status"],
+        await log_event(o, actor, "collected", f"{m} 주문 수집 — {line['product_name'][:60]} ×{line['quantity']} ({line['market_status']}){run_suffix(run)}", {
+            **run_tag(run), "code": o.code, "market": line["market"], "line_no": line["line_no"], "order_no": line["order_no"], "market_status": line["market_status"],
             "confirmed": line["confirmed"], "quantity": line["quantity"], "total_price": line["total_price"],
             "receiver": {"name": mask_name(line["receiver_name"]), "phone": mask_phone(line["phone"]), "zip": line["zip"]},
         }, run)
+        if o.claim_type:
+            await _log_claim(o, actor, run, None)
         if o.stage != "cancelled":
             await run_pccc_check(o, actor, "새 주문", run)
         return "created"
 
-    diff = {k: [_fmt(getattr(o, k)), _fmt(fields[k])] for k in TRACKED if getattr(o, k) != fields[k]}
+    diff = {k: [_fmt(getattr(o, k)), _fmt(fields[k])] for k in TRACKED if k in fields and getattr(o, k) != fields[k]}
+    claim_before = (o.claim_type, o.claim_status)
     receiver_changed = o.receiver_hash != fp
     for k, v in {**fields, **secret}.items():
         setattr(o, k, v)
     await o.save()
     if not diff and not receiver_changed:
         return "same"
-    data = {"diff": diff}
+    data = {**run_tag(run), "diff": diff}
     if receiver_changed:
         data["receiver_now"] = {"name": mask_name(line["receiver_name"]), "phone": mask_phone(line["phone"]), "zip": line["zip"]}
-    names = {"market_status": "상태", "confirmed": "발주확인", "stage": "단계", "quantity": "수량", "total_price": "금액"}
+    names = {"market_status": "상태", "confirmed": "발주확인", "stage": "단계", "quantity": "수량", "total_price": "금액",
+             "claim_type": "클레임", "claim_status": "클레임 상태"}
     parts = [f"{names[k]} {a}→{b}" for k, (a, b) in diff.items() if k in names]
     if receiver_changed:
         parts.append("수취인·통관 정보 바뀜")
-    await log_event(o, actor, "changed", f"{m} 주문 변경 — " + ", ".join(parts or ["세부 정보"]), data, run)
+    await log_event(o, actor, "changed", f"{m} 주문 변경 — " + ", ".join(parts or ["세부 정보"]) + run_suffix(run), data, run)
+    if (o.claim_type, o.claim_status) != claim_before and o.claim_type:
+        await _log_claim(o, actor, run, claim_before)
     # 마켓에서 발주확인이 된 걸 수집으로 알게 됨 (AGC 발주확인 버튼으로 보낸 게 아님) — 단계가 보이게 따로 남긴다
     if diff.get("confirmed", [None, None])[1] is True:
         await log_event(o, actor, "market_confirmed", f"{m} 발주확인됨 — 마켓에서 확인 (수집으로 감지, AGC 에서 보낸 것 아님)", {
@@ -263,6 +300,47 @@ async def upsert_line(line: dict, actor: dict, run) -> str:
     if receiver_changed and o.stage != "cancelled":
         await run_pccc_check(o, actor, "수취인·통관 정보 바뀜", run)
     return "changed"
+
+
+# ------------------------------------------------------------ 클레임 (취소·반품·교환) — 2026-10-27
+async def _log_claim(o: MarketOrder, actor: dict, run, before) -> None:
+    """새 클레임·클레임 상태 변화 = OrderEvent(kind=claim). 주문 접수 화면 알림이 이 기록을 본다."""
+    m = MARKET_LABEL[o.market]
+    label = CLAIM_LABEL.get(o.claim_type or "", o.claim_type or "")
+    await log_event(o, actor, "claim", f"{m} 클레임 — {label} {o.claim_status or ''}".strip() + run_suffix(run), {
+        **run_tag(run), "claim_type": o.claim_type, "claim_status": o.claim_status, "claim_at": _fmt(o.claim_at),
+        "before": {"claim_type": before[0], "claim_status": before[1]} if before else None,
+    }, run)
+
+
+async def apply_coupang_claims(start: datetime, end: datetime, actor: dict, run) -> int:
+    """쿠팡 반품/취소 요청 목록 → 해당 주문 줄에 클레임 표시. 결제완료에서 취소된 주문(CANCEL)은 단계도 취소로.
+    반환: 바뀐 주문 줄 수."""
+    receipts = await mc.coupang_claims(start, end)
+    changed = 0
+    for rc in receipts:
+        # 어느 조회로 받았는지로 종류를 정한다: cancelType=CANCEL → 취소 완료 · status=RU → 출고중지 요청 · UC → 반품
+        ctype = rc.get("_claim") or "RETURN"
+        rstatus = str(rc.get("receiptStatus") or rc.get("_status") or "")
+        at = _dt(rc.get("createdAt"))
+        items = rc.get("returnItems") or [{}]
+        for it in items:
+            qs = MarketOrder.filter(market="coupang", order_no=str(rc.get("orderId") or ""))
+            if it.get("vendorItemId"):
+                qs = qs.filter(market_option_id=str(it["vendorItemId"]))
+            for o in await qs:
+                before = (o.claim_type, o.claim_status)
+                if before == (ctype, rstatus or None):
+                    continue
+                o.claim_type, o.claim_status, o.claim_at = ctype, rstatus or None, at or o.claim_at
+                fields = ["claim_type", "claim_status", "claim_at", "updated_at"]
+                if ctype == "CANCEL" and o.stage != "cancelled":
+                    o.stage = "cancelled"
+                    fields.append("stage")
+                await o.save(update_fields=fields)
+                await _log_claim(o, actor, run, before)
+                changed += 1
+    return changed
 
 
 # ------------------------------------------------------------ 한 주문만 다시 보기 · 발주확인 시각
@@ -330,6 +408,8 @@ async def collect_market(market: str, auth: dict | None, trigger: str = "manual"
                     run.created += 1
                 elif r == "changed":
                     run.changed += 1
+            if market == "coupang":   # 취소·반품 요청은 발주서 목록에 안 나온다 → 따로
+                run.changed += await apply_coupang_claims(start, end, actor, run)
             run.ok = True
         except (mc.MarketApiError, HTTPException) as e:
             run.ok, run.error = False, (e.detail if isinstance(e, HTTPException) else str(e))[:1000]
@@ -378,6 +458,7 @@ def order_dict(o: MarketOrder) -> dict:
     return {
         "id": o.id, "code": o.code, "market": o.market, "line_no": o.line_no, "order_no": o.order_no, "ship_unit_no": o.ship_unit_no,
         "market_status": o.market_status, "confirmed": o.confirmed, "stage": o.stage,
+        "claim_type": o.claim_type, "claim_status": o.claim_status, "claim_at": _fmt(o.claim_at),
         "ordered_at": _fmt(o.ordered_at), "paid_at": _fmt(o.paid_at), "ship_due_at": _fmt(o.ship_due_at),
         "product_name": o.product_name, "option_name": o.option_name, "seller_code": o.seller_code,
         "market_product_id": o.market_product_id, "market_option_id": o.market_option_id,
@@ -505,3 +586,18 @@ class OrderService:
                             "market_status": {"from": before["market_status"], "to": r.market_status}},
             })
         return await OrderService.get(order_id)
+
+    @staticmethod
+    async def updates(after: int | None) -> dict:
+        """주문 접수 화면 알림용 — after(이벤트 id) 뒤에 생긴 새 주문(collected)·클레임(claim). after 가 없으면 기준 id 만."""
+        last = await OrderEvent.all().order_by("-id").first()
+        last_id = last.id if last else 0
+        if after is None:
+            return {"last_event_id": last_id, "new_orders": [], "claims": []}
+        evs = await OrderEvent.filter(id__gt=after, kind__in=["collected", "claim"]).order_by("id").limit(100).prefetch_related("order")
+        pick = lambda e: {"event_id": e.id, "order_id": e.order_id, "code": e.order.code, "market": e.order.market,
+                          "product_name": e.order.product_name, "summary": e.summary, "at": e.created_at.isoformat(),
+                          "auto": bool((e.data or {}).get("run", {}).get("auto"))}
+        return {"last_event_id": last_id,
+                "new_orders": [pick(e) for e in evs if e.kind == "collected"],
+                "claims": [pick(e) for e in evs if e.kind == "claim"]}

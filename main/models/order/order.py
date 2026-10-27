@@ -46,6 +46,11 @@ class MarketOrder(BaseModel):
     raw_enc = fields.TextField(null=True)                           # 마지막으로 받은 마켓 원본 응답 (암호문) — 추적용
     last_synced_at = fields.DatetimeField(null=True)
 
+    # 클레임 (취소·반품·교환 요청) — 2026-10-27. 네이버: productOrder.claimType·claimStatus · 쿠팡: 반품/취소 요청 목록(returnRequests)의 receiptType·receiptStatus
+    claim_type = fields.CharField(max_length=20, null=True)        # CANCEL · RETURN · EXCHANGE · ADMIN_CANCEL …
+    claim_status = fields.CharField(max_length=40, null=True)      # 마켓 원래 값 (네이버 CANCEL_REQUEST… · 쿠팡 RU·UC·CANCEL…)
+    claim_at = fields.DatetimeField(null=True)                     # 클레임 접수 시각
+
     class Meta:
         table = "market_order"
         unique_together = (("market", "line_no"),)

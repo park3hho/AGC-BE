@@ -74,6 +74,17 @@ async def collect_status(auth=Depends(require_feature(Feature.ORDER))):
         raise _fail("수집 상태 조회", e)
 
 
+@router.get("/updates")    # ★ /{order_id} 보다 먼저
+async def order_updates(after: Optional[int] = Query(default=None, ge=0), auth=Depends(require_feature(Feature.ORDER))):
+    """주문 접수 화면 알림 — after(이벤트 id) 뒤 새 주문·새 클레임. 화면은 자동 수집 주기마다 부른다."""
+    try:
+        return success(**await OrderService.updates(after))
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise _fail("새 소식 조회", e)
+
+
 @router.get("/sync-runs")
 async def list_sync_runs(market: Optional[Market] = None, limit: int = Query(default=20, ge=1, le=100),
                          auth=Depends(require_feature(Feature.ORDER))):
