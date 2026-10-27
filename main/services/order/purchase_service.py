@@ -14,7 +14,7 @@ from core.purchase_config import CN_STATUS, PURCHASE_TRACKED
 from models.order.order import MarketOrder
 from models.order.purchase import TaobaoPurchase
 from schemas.taobao_purchase import TaobaoPurchaseCreate, TaobaoPurchaseUpdate
-from services.order.order_service import actor_of, confirmed_at, log_event, refresh_order
+from services.order.order_service import actor_of, confirmed_at, log_event, refresh_order, restage
 
 logger = logging.getLogger(__name__)
 
@@ -168,6 +168,7 @@ class TaobaoPurchaseService:
             order, actor, "purchase_created", f"타오바오 {p.taobao_order_no} 등록 — {CN_STATUS[p.cn_status]}",
             {"purchase_id": p.id, "values": {k: v for k, v in snap.items() if v not in (None, [], "")}},
         )
+        await restage(order, actor, "타오바오 구매 기록")   # 구매 기록이 생기면 접수 → 처리
         return await purchase_dict(p)
 
     @staticmethod
@@ -196,6 +197,7 @@ class TaobaoPurchaseService:
                 order, actor, "purchase_changed", f"타오바오 {p.taobao_order_no} — {_summary_of(changes)}",
                 {"purchase_id": p.id, "changes": changes},
             )
+        await restage(await MarketOrder.get(id=p.order_id), actor, "타오바오 구매 상태 변경")   # 취소·환불로 바뀌면 다시 접수
         return await purchase_dict(p)
 
     @staticmethod
@@ -207,7 +209,9 @@ class TaobaoPurchaseService:
         p.deleted_at = datetime.now(timezone.utc)
         await p.save(update_fields=["deleted_at", "updated_at"])
         snap = _snapshot(p)
+        order = await MarketOrder.get(id=p.order_id)
         await log_event(
-            await MarketOrder.get(id=p.order_id), actor, "purchase_deleted", f"타오바오 {p.taobao_order_no} 삭제",
+            order, actor, "purchase_deleted", f"타오바오 {p.taobao_order_no} 삭제",
             {"purchase_id": p.id, "values": {k: v for k, v in snap.items() if v not in (None, [], "")}},
         )
+        await restage(order, actor, "타오바오 구매 기록 삭제")   # 남은 구매 기록이 없으면 처리 → 접수

@@ -15,6 +15,8 @@ from tortoise.expressions import Q
 
 from core.account_crypto import decrypt_secret, encrypt_secret
 from models.order.order import MarketOrder, OrderEvent, OrderSyncRun
+from models.order.jiyun import JiyunShipment
+from models.order.purchase import TaobaoPurchase
 from services.order import market_clients as mc
 from services.order.pccc import (PcccInput, check_pccc, mask_name, mask_phone, norm_pccc, norm_phone, norm_zip,
                                  receiver_fingerprint)
@@ -243,6 +245,63 @@ async def issue_code(o: MarketOrder, actor: dict, run=None) -> str:
 
 
 # ------------------------------------------------------------ 저장 (새 주문 · 바뀐 주문)
+# ------------------------------------------------------------ 단계 판정 (2026-10-27)
+STAGE_LABEL = {"received": "접수", "processing": "처리", "done": "완료", "cancelled": "취소"}
+PROGRESS_STEPS = ("타오바오 구매", "판매처 발송", "집운 입고", "국제 발송")
+
+
+def market_stage(o_or_line) -> str:
+    status = o_or_line["market_status"] if isinstance(o_or_line, dict) else o_or_line.market_status
+    market = o_or_line["market"] if isinstance(o_or_line, dict) else o_or_line.market
+    return (NAVER_STAGE if market == "naver" else COUPANG_STAGE).get(status, "received")
+
+
+def decide_stage(mstage: str, claim_cancelled: bool, purchased: bool) -> str:
+    """취소·반품 > 배송완료(완료) > 배송중 또는 타오바오 구매 기록 있음(처리) > 그 외(접수)."""
+    if claim_cancelled or mstage == "cancelled":
+        return "cancelled"
+    if mstage == "done":
+        return "done"
+    if mstage == "processing" or purchased:
+        return "processing"
+    return "received"
+
+
+async def has_purchase(order_id: int) -> bool:
+    """살아 있는 타오바오 구매 기록 (취소·환불 상태는 뺀다)."""
+    return await TaobaoPurchase.filter(order_id=order_id, deleted_at=None).exclude(cn_status="cancelled").exists()
+
+
+def _claim_cancelled(o: MarketOrder) -> bool:
+    """마켓 상태와 별개로 클레임으로 끝난 주문 (쿠팡 반품/취소 완료 등) — 단계 취소 유지."""
+    return bool(o.claim_type) and o.stage == "cancelled"
+
+
+async def restage(o: MarketOrder, actor: dict, reason: str, run=None) -> bool:
+    """단계를 다시 판정해서 바뀌면 저장 + OrderEvent(kind=stage). 타오바오 구매 등록·삭제 때 부른다."""
+    new = decide_stage(market_stage(o), _claim_cancelled(o), await has_purchase(o.id))
+    if new == o.stage:
+        return False
+    old = o.stage
+    o.stage = new
+    await o.save(update_fields=["stage", "updated_at"])
+    await log_event(o, actor, "stage", f"단계 {STAGE_LABEL.get(old, old)} → {STAGE_LABEL.get(new, new)} ({reason})",
+                    {**run_tag(run), "stage": {"from": old, "to": new}, "reason": reason}, run)
+    return True
+
+
+async def progress_of(order_ids: list[int]) -> dict[int, dict]:
+    """처리 목록의 진행 위치 — 타오바오 구매 / 판매처 발송 / 집운 입고 / 국제 발송 중 지금 칸 (주문마다 가장 앞선 것)."""
+    out: dict[int, int] = {}
+    for p in await TaobaoPurchase.filter(order_id__in=order_ids, deleted_at=None).exclude(cn_status="cancelled"):
+        step = {"ordered": 0, "shipped": 1, "arrived": 2}.get(p.cn_status, 0)
+        out[p.order_id] = max(out.get(p.order_id, 0), step)
+    for j in await JiyunShipment.filter(order_id__in=order_ids, deleted_at=None).exclude(status="cancelled"):
+        step = 3 if j.status == "dispatched" else 2
+        out[j.order_id] = max(out.get(j.order_id, 0), step)
+    return {oid: {"step": s, "label": PROGRESS_STEPS[s], "total": len(PROGRESS_STEPS)} for oid, s in out.items()}
+
+
 async def upsert_line(line: dict, actor: dict, run) -> str:
     """반환: created · changed · same."""
     fp = receiver_fingerprint(line["pccc"], line["receiver_name"], line["phone"], line["zip"])
@@ -272,6 +331,8 @@ async def upsert_line(line: dict, actor: dict, run) -> str:
             await run_pccc_check(o, actor, "새 주문", run)
         return "created"
 
+    # 단계 = 마켓 상태만이 아니라 타오바오 구매 기록·클레임까지 보고 정한다 (decide_stage)
+    fields["stage"] = decide_stage(fields["stage"], _claim_cancelled(o), await has_purchase(o.id))
     diff = {k: [_fmt(getattr(o, k)), _fmt(fields[k])] for k in TRACKED if k in fields and getattr(o, k) != fields[k]}
     claim_before = (o.claim_type, o.claim_status)
     receiver_changed = o.receiver_hash != fp
@@ -652,7 +713,9 @@ class OrderService:
         rows = await qs.order_by("-ordered_at", "-id").offset((page - 1) * size).limit(size)
         counts = {s: await base.filter(pccc_status=s).count() for s in ("ok", "mismatch", "missing", "error", "pending")}
         runs = {m: run_dict(await OrderSyncRun.filter(market=m).order_by("-id").first()) for m in MARKETS}
-        return {"items": [order_dict(o) for o in rows], "total": total, "page": page, "size": size,
+        prog = await progress_of([o.id for o in rows])
+        items = [{**order_dict(o), "progress": prog.get(o.id)} for o in rows]
+        return {"items": items, "total": total, "page": page, "size": size,
                 "pccc_counts": counts, "last_runs": runs, "poll_minutes": POLL_MINUTES}
 
     @staticmethod
