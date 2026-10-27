@@ -50,6 +50,7 @@ class MarketOrder(BaseModel):
     claim_type = fields.CharField(max_length=20, null=True)        # CANCEL · RETURN · EXCHANGE · ADMIN_CANCEL …
     claim_status = fields.CharField(max_length=40, null=True)      # 마켓 원래 값 (네이버 CANCEL_REQUEST… · 쿠팡 RU·UC·CANCEL…)
     claim_at = fields.DatetimeField(null=True)                     # 클레임 접수 시각
+    claim_reason = fields.CharField(max_length=300, null=True)     # 사람이 읽는 사유 — 예: 판매자 취소 · 재고연동오류 (2026-10-27)
     # 실제 정산액 (원) — 쿠팡 매출내역(revenue-history, 구매확정 뒤 생김). 없으면 화면은 수수료율로 추정 (2026-10-27)
     settlement_actual = fields.IntField(null=True)
     settlement_date = fields.DateField(null=True)                   # 정산(예정)일

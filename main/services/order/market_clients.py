@@ -205,7 +205,9 @@ async def coupang_claims(since: datetime, until: datetime) -> list[dict]:
     while until - start > timedelta(minutes=1):
         end = min(start + timedelta(days=7), until)
         base = {"searchType": "timeFrame", "createdAtFrom": fmt(start), "createdAtTo": fmt(end)}
-        for claim, extra in (("CANCEL", {"cancelType": "CANCEL"}), ("STOP_SHIPPING", {"status": "RU"}), ("RETURN", {"status": "UC"})):
+        # DONE = status=CC (반품·취소 완료) — 판매자가 상품준비중에서 취소한 건은 여기로만 나온다 (releaseStatus=S 출고중지완료)
+        for claim, extra in (("CANCEL", {"cancelType": "CANCEL"}), ("STOP_SHIPPING", {"status": "RU"}),
+                             ("RETURN", {"status": "UC"}), ("DONE", {"status": "CC"})):
             data = await _coupang_get(path, urllib.parse.urlencode({**base, **extra}))
             if str(data.get("code")) not in ("200", "SUCCESS"):
                 raise MarketApiError(f"쿠팡 반품/취소 {data.get('code')} {str(data.get('message'))[:200]}")

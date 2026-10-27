@@ -303,42 +303,64 @@ async def upsert_line(line: dict, actor: dict, run) -> str:
 
 
 # ------------------------------------------------------------ 클레임 (취소·반품·교환) — 2026-10-27
-async def _log_claim(o: MarketOrder, actor: dict, run, before) -> None:
+async def _log_claim(o: MarketOrder, actor: dict, run, before, extra: dict | None = None) -> None:
     """새 클레임·클레임 상태 변화 = OrderEvent(kind=claim). 주문 접수 화면 알림이 이 기록을 본다."""
     m = MARKET_LABEL[o.market]
     label = CLAIM_LABEL.get(o.claim_type or "", o.claim_type or "")
-    await log_event(o, actor, "claim", f"{m} 클레임 — {label} {o.claim_status or ''}".strip() + run_suffix(run), {
+    done = (extra or {}).get("done")
+    head = f"{label} 완료" if done else f"{label} {o.claim_status or ''}".strip()
+    await log_event(o, actor, "claim", f"{m} 클레임 — {head}" + (f" ({o.claim_reason})" if o.claim_reason else "") + run_suffix(run), {
         **run_tag(run), "claim_type": o.claim_type, "claim_status": o.claim_status, "claim_at": _fmt(o.claim_at),
+        "claim_reason": o.claim_reason, "done": bool(done), "stage": o.stage, "detail": extra or None,
         "before": {"claim_type": before[0], "claim_status": before[1]} if before else None,
     }, run)
 
 
-async def apply_coupang_claims(start: datetime, end: datetime, actor: dict, run) -> int:
-    """쿠팡 반품/취소 요청 목록 → 해당 주문 줄에 클레임 표시. 결제완료에서 취소된 주문(CANCEL)은 단계도 취소로.
-    반환: 바뀐 주문 줄 수."""
+def _coupang_claim_reason(rc: dict) -> tuple[str, dict]:
+    """사람이 읽는 사유 + 기록용 원본 사유. 판매자 취소(파트너 API 강제 취소)는 '판매자 취소'로 앞에 붙인다."""
+    c1, c2 = rc.get("cancelReasonCategory1") or "", rc.get("cancelReasonCategory2") or ""
+    reason = rc.get("cancelReason") or rc.get("reasonCodeText") or ""
+    by = "판매자 취소" if ("파트너" in reason or "판매자" in reason) else ("고객 요청" if rc.get("requesterName") else "")
+    text = " · ".join(x for x in (by, c2 or c1) if x) or reason or None
+    return text, {"category1": c1, "category2": c2, "reason": reason, "reason_code": rc.get("reasonCode"),
+                  "receipt_id": rc.get("receiptId"), "receipt_type": rc.get("receiptType"), "receipt_status": rc.get("receiptStatus")}
+
+
+async def apply_coupang_claims(start: datetime, end: datetime, actor: dict, run, order_no: str | None = None) -> int:
+    """쿠팡 반품/취소 요청 목록 → 해당 주문 줄에 클레임 표시. 반환: 바뀐 주문 줄 수.
+    - CANCEL (cancelType=CANCEL): 결제완료에서 바로 취소 → 취소, 단계 취소
+    - STOP_SHIPPING (RU) · RETURN (UC): 요청 — 단계는 그대로 (판매자 처리 필요)
+    - DONE (CC, 완료): returnItems.releaseStatus=S(출고중지완료 = 출고 전) → 취소 완료, 아니면 반품 완료 · 단계 취소
+    order_no 를 주면 그 주문만."""
     receipts = await mc.coupang_claims(start, end)
     changed = 0
     for rc in receipts:
-        # 어느 조회로 받았는지로 종류를 정한다: cancelType=CANCEL → 취소 완료 · status=RU → 출고중지 요청 · UC → 반품
-        ctype = rc.get("_claim") or "RETURN"
-        rstatus = str(rc.get("receiptStatus") or rc.get("_status") or "")
+        if order_no and str(rc.get("orderId") or "") != order_no:
+            continue
+        kind = rc.get("_claim") or "RETURN"
+        rstatus = str(rc.get("receiptStatus") or rc.get("_status") or "") or None
         at = _dt(rc.get("createdAt"))
-        items = rc.get("returnItems") or [{}]
-        for it in items:
+        reason, reason_raw = _coupang_claim_reason(rc)
+        for it in rc.get("returnItems") or [{}]:
+            if kind == "DONE":
+                ctype = "CANCEL" if str(it.get("releaseStatus") or "") == "S" else "RETURN"
+            else:
+                ctype = kind
+            done = kind in ("CANCEL", "DONE")
             qs = MarketOrder.filter(market="coupang", order_no=str(rc.get("orderId") or ""))
             if it.get("vendorItemId"):
                 qs = qs.filter(market_option_id=str(it["vendorItemId"]))
             for o in await qs:
                 before = (o.claim_type, o.claim_status)
-                if before == (ctype, rstatus or None):
+                if before == (ctype, rstatus) and o.claim_reason == reason and (not done or o.stage == "cancelled"):
                     continue
-                o.claim_type, o.claim_status, o.claim_at = ctype, rstatus or None, at or o.claim_at
-                fields = ["claim_type", "claim_status", "claim_at", "updated_at"]
-                if ctype == "CANCEL" and o.stage != "cancelled":
+                o.claim_type, o.claim_status, o.claim_at, o.claim_reason = ctype, rstatus, at or o.claim_at, reason
+                fields = ["claim_type", "claim_status", "claim_at", "claim_reason", "updated_at"]
+                if done and o.stage != "cancelled":
                     o.stage = "cancelled"
                     fields.append("stage")
                 await o.save(update_fields=fields)
-                await _log_claim(o, actor, run, before)
+                await _log_claim(o, actor, run, before, {**reason_raw, "release_status": it.get("releaseStatus"), "done": done})
                 changed += 1
     return changed
 
@@ -390,7 +412,14 @@ async def refresh_order(o: MarketOrder, actor: dict, reason: str) -> MarketOrder
     """이 주문 하나만 마켓에서 바로 다시 받아 저장한다 (바뀐 게 있으면 changed · market_confirmed 기록).
     마켓에서 바로 한 발주확인을 AGC 가 아직 모를 때 — 예: 타오바오 구매 등록 직전."""
     if o.market == "coupang":
-        box = await mc.coupang_ordersheet(o.ship_unit_no)
+        try:
+            box = await mc.coupang_ordersheet(o.ship_unit_no)
+        except mc.MarketApiError as e:
+            # 쿠팡은 취소·반품된 발주서를 400 "해당 주문이 취소 또는 반품되었습니다." 로 돌려준다 → 취소로 바꾸고 사유 보강
+            if "취소 또는 반품" not in str(e):
+                raise
+            await mark_coupang_gone(o, actor, str(e))
+            return await MarketOrder.get(id=o.id)
         lines = parse_coupang(box) if box else []
     else:
         items = await mc.naver_product_orders([o.ship_unit_no])
@@ -401,6 +430,23 @@ async def refresh_order(o: MarketOrder, actor: dict, reason: str) -> MarketOrder
     fresh = await MarketOrder.get(id=o.id)
     logger.info(f"주문 다시 보기: order_id={o.id} reason={reason} confirmed={fresh.confirmed}")
     return fresh
+
+
+async def mark_coupang_gone(o: MarketOrder, actor: dict, message: str) -> None:
+    """발주서 조회가 '취소 또는 반품되었습니다' 를 줄 때 — 단계 취소 + 반품/취소 목록에서 사유를 찾아 채운다."""
+    if o.stage != "cancelled":
+        before = (o.claim_type, o.claim_status)
+        o.stage = "cancelled"
+        o.claim_type = o.claim_type or "CANCEL"
+        o.claim_status = o.claim_status or "CANCELED_OR_RETURNED"
+        await o.save(update_fields=["stage", "claim_type", "claim_status", "updated_at"])
+        await _log_claim(o, actor, None, before, {"done": True, "source": "coupang_ordersheet", "message": message[:200]})
+    now = datetime.now(timezone.utc)
+    since = max((o.paid_at or o.ordered_at or now) - timedelta(days=1), now - MAX_RANGE)
+    try:
+        await apply_coupang_claims(since, now, actor, None, order_no=o.order_no)
+    except mc.MarketApiError as e:
+        logger.warning(f"쿠팡 취소 사유 보강 실패: order_id={o.id} {str(e)[:200]}")
 
 
 async def confirmed_at(o: MarketOrder) -> datetime | None:
@@ -556,6 +602,7 @@ def order_dict(o: MarketOrder) -> dict:
         "id": o.id, "code": o.code, "market": o.market, "line_no": o.line_no, "order_no": o.order_no, "ship_unit_no": o.ship_unit_no,
         "market_status": o.market_status, "confirmed": o.confirmed, "stage": o.stage,
         "claim_type": o.claim_type, "claim_status": o.claim_status, "claim_at": _fmt(o.claim_at),
+        "claim_reason": o.claim_reason,
         "ordered_at": _fmt(o.ordered_at), "paid_at": _fmt(o.paid_at), "ship_due_at": _fmt(o.ship_due_at),
         "product_name": o.product_name, "option_name": o.option_name, "seller_code": o.seller_code,
         "market_product_id": o.market_product_id, "market_option_id": o.market_option_id,
