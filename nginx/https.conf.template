@@ -54,6 +54,30 @@ server {
         return 503 '{"detail":"MKT 서버가 꺼져 있어요"}';
     }
 
+    # SHOP BE — 자사몰 eidofood.com (C:\Users\iwill\SHOP\BE, 컨테이너 shop_app) — /shop/ 아래를 넘긴다 (2026-10-27).
+    #   MKT 와 같은 방식: 요청 때 이름을 찾아 SHOP 이 꺼져 있어도 AGC nginx 는 뜨고, /shop/ 만 503 JSON.
+    #   결제 승인·취소는 결제사 응답을 60초까지 기다려야 해서 read 는 90초.
+    location = /shop {
+        return 301 /shop/;
+    }
+    location /shop/ {
+        resolver 127.0.0.11 valid=30s ipv6=off;
+        set $shop_upstream http://shop_app:8000;
+        rewrite ^/shop/(.*)$ /$1 break;
+        proxy_pass $shop_upstream;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_connect_timeout 5s;
+        proxy_read_timeout 90s;
+        error_page 502 504 = @shop_down;
+    }
+    location @shop_down {
+        default_type "application/json; charset=utf-8";
+        return 503 '{"detail":"자사몰 서버가 꺼져 있어요"}';
+    }
+
     location / {
         # 'app' 은 같은 네트워크(be_default)의 MKT 컨테이너도 서비스 이름으로 갖고 있어 둘로 나뉘어 갔다 → 컨테이너 이름으로 고정.
         #   (2026-10-26 MKT 서비스 이름을 mkt_app 으로 바꿔 원인은 없어졌지만, 다른 서비스가 붙어도 안전하게 고정은 유지)
