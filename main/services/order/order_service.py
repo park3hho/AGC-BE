@@ -343,6 +343,48 @@ async def apply_coupang_claims(start: datetime, end: datetime, actor: dict, run)
     return changed
 
 
+# ------------------------------------------------------------ 쿠팡 실제 정산액 (매출내역) — 2026-10-27
+REVENUE_EVERY = timedelta(hours=6)       # 자동 수집 5분마다 부르지 않게 — 수동 수집이면 바로
+REVENUE_DAYS = 31
+_revenue_last: dict = {"at": None}
+
+
+async def apply_coupang_revenue(actor: dict, run, force: bool = False) -> int:
+    """구매확정 등으로 매출 인식된 쿠팡 주문의 실제 정산액을 주문 줄에 붙인다. 반환: 바뀐 줄 수."""
+    now = datetime.now(timezone.utc)
+    if not force and _revenue_last["at"] and now - _revenue_last["at"] < REVENUE_EVERY:
+        return 0
+    _revenue_last["at"] = now
+    today = now.astimezone(KST).date()
+    rows = await mc.coupang_revenue((today - timedelta(days=REVENUE_DAYS)).isoformat(), (today - timedelta(days=1)).isoformat())
+    sums: dict[tuple, dict] = {}
+    for r in rows:
+        for it in r.get("items") or []:
+            key = (str(r.get("orderId") or ""), str(it.get("vendorItemId") or ""))
+            s = sums.setdefault(key, {"amount": 0, "date": r.get("settlementDate") or r.get("recognitionDate")})
+            s["amount"] += _units(it.get("settlementAmount"))
+    changed = 0
+    for (order_no, item_id), s in sums.items():
+        qs = MarketOrder.filter(market="coupang", order_no=order_no)
+        if item_id:
+            qs = qs.filter(market_option_id=item_id)
+        for o in await qs:
+            if o.settlement_actual == s["amount"]:
+                continue
+            before = o.settlement_actual
+            o.settlement_actual = s["amount"]
+            try:
+                o.settlement_date = datetime.fromisoformat(str(s["date"])[:10]).date() if s["date"] else o.settlement_date
+            except ValueError:
+                pass
+            await o.save(update_fields=["settlement_actual", "settlement_date", "updated_at"])
+            await log_event(o, actor, "settled", f"쿠팡 정산액 확인 — {s['amount']:,}원" + run_suffix(run), {
+                **run_tag(run), "settlement": {"from": before, "to": s["amount"]}, "settlement_date": s["date"], "source": "coupang_revenue_history",
+            }, run)
+            changed += 1
+    return changed
+
+
 # ------------------------------------------------------------ 한 주문만 다시 보기 · 발주확인 시각
 async def refresh_order(o: MarketOrder, actor: dict, reason: str) -> MarketOrder:
     """이 주문 하나만 마켓에서 바로 다시 받아 저장한다 (바뀐 게 있으면 changed · market_confirmed 기록).
@@ -410,6 +452,10 @@ async def collect_market(market: str, auth: dict | None, trigger: str = "manual"
                     run.changed += 1
             if market == "coupang":   # 취소·반품 요청은 발주서 목록에 안 나온다 → 따로
                 run.changed += await apply_coupang_claims(start, end, actor, run)
+                try:   # 실제 정산액 — 실패해도 주문 수집은 성공으로 둔다
+                    run.changed += await apply_coupang_revenue(actor, run, force=trigger != "poller")
+                except mc.MarketApiError as e:
+                    logger.warning(f"쿠팡 매출내역 실패: run={run.id} {str(e)[:200]}")
             run.ok = True
         except (mc.MarketApiError, HTTPException) as e:
             run.ok, run.error = False, (e.detail if isinstance(e, HTTPException) else str(e))[:1000]
@@ -452,6 +498,57 @@ def _short_address(addr: str) -> str:
     return " ".join(parts[:2]) + (" …" if len(parts) > 2 else "")
 
 
+# ------------------------------------------------------------ 금액 — 총액 · 할인(부담 주체) · 고객 결제 · 수수료 · 정산 (2026-10-27)
+def _units(v) -> int:
+    """쿠팡 금액 {'units': 18400, 'nanos': 0} · 숫자 · None → 정수 원."""
+    if isinstance(v, dict):
+        return int(v.get("units") or 0)
+    try:
+        return int(v or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _coupang_fee_rate() -> float:
+    from core.pricing_config import DEFAULT_FEE_RATES, Platform
+    r = DEFAULT_FEE_RATES[Platform.COUPANG]
+    return float(r["platform_fee_rate"]) + float(r["payment_fee_rate"] or 0)
+
+
+def amount_of(o: MarketOrder, raw: dict | None) -> dict | None:
+    """마켓 원본에서 금액 칸을 만든다 (저장된 raw 만 씀, 새 호출 없음).
+    total 판매가(총액) · discount 할인 합계 · discount_market 마켓 부담 · discount_seller 판매자 부담(우리 몫이 깎임)
+    · paid 고객 결제 · fee 수수료 · fee_detail [{label, amount}] · settlement 정산 예정 · estimated (수수료율로 계산했으면 true)"""
+    if not raw:
+        return None
+    if o.market == "naver":
+        po = raw.get("productOrder") or {}
+        total = _units(po.get("totalProductAmount"))
+        discount = _units(po.get("productDiscountAmount")) + _units(po.get("deliveryDiscountAmount"))
+        seller = _units(po.get("sellerBurdenProductDiscountAmount")) + _units(po.get("sellerBurdenStoreDiscountAmount"))
+        fees = [("결제", _units(po.get("paymentCommission"))), ("쇼핑연동", _units(po.get("knowledgeShoppingSellingInterlockCommission"))),
+                ("판매", _units(po.get("saleCommission"))), ("채널", _units(po.get("channelCommission")))]
+        fees = [(k, v) for k, v in fees if v]
+        settle = po.get("expectedSettlementAmount")
+        return {"total": total, "discount": discount, "discount_market": max(0, discount - seller), "discount_seller": seller,
+                "paid": _units(po.get("totalPaymentAmount")), "fee": sum(v for _, v in fees),
+                "fee_detail": [{"label": k, "amount": v} for k, v in fees], "fee_rate": None,
+                "settlement": _units(settle) if settle is not None else None, "estimated": False, "actual": False}
+    # 쿠팡 — 발주서 orderItems 중 이 줄(vendorItemId). 정산 예정은 발주서에 없어 수수료율로 추정, 매출내역이 오면 실제 값
+    items = raw.get("orderItems") or []
+    oi = next((x for x in items if str(x.get("vendorItemId")) == str(o.market_option_id)), items[0] if items else {})
+    total = _units(oi.get("orderPrice"))
+    discount = _units(oi.get("discountPrice"))
+    market = _units(oi.get("coupangDiscount"))
+    seller = _units(oi.get("instantCouponDiscount")) + _units(oi.get("downloadableCouponDiscount"))
+    rate = _coupang_fee_rate()
+    fee = round(total * rate / 100)
+    actual = o.settlement_actual is not None
+    return {"total": total, "discount": discount, "discount_market": market, "discount_seller": seller,
+            "paid": total - discount, "fee": fee, "fee_detail": [], "fee_rate": rate,
+            "settlement": o.settlement_actual if actual else total - fee - seller, "estimated": not actual, "actual": actual}
+
+
 def order_dict(o: MarketOrder) -> dict:
     phone, pccc, contact = _dec(o.receiver_phone_enc), _dec(o.pccc_enc), _dec(o.contact_phone_enc)
     from services.order.pccc import mask_pccc
@@ -470,6 +567,8 @@ def order_dict(o: MarketOrder) -> dict:
         "pccc_status": o.pccc_status, "pccc_message": o.pccc_message,
         "pccc_checked_at": _fmt(o.pccc_checked_at), "pccc_valid_to": o.pccc_valid_to.isoformat() if o.pccc_valid_to else None,
         "last_synced_at": _fmt(o.last_synced_at), "created_at": o.created_at.isoformat(),
+        "amount": amount_of(o, json.loads(_dec(o.raw_enc) or "null")),
+        "settlement_date": o.settlement_date.isoformat() if o.settlement_date else None,
     }
 
 

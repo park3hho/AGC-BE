@@ -215,3 +215,22 @@ async def coupang_claims(since: datetime, until: datetime) -> list[dict]:
         start = end
     return out
 
+
+async def coupang_revenue(date_from: str, date_to: str) -> list[dict]:
+    """쿠팡 매출내역 (구매확정 등으로 매출 인식된 건) — recognitionDate 기준 'yyyy-MM-dd', 끝 날짜는 어제까지.
+    항목: {orderId, saleType, recognitionDate, settlementDate, items: [{vendorItemId, settlementAmount, serviceFee, …}]}. 2026-10-27."""
+    vendor = await coupang_vendor_id()
+    path = "/v2/providers/openapi/apis/api/v1/revenue-history"
+    out: list[dict] = []
+    token = ""
+    for _ in range(50):
+        q = {"vendorId": vendor, "recognitionDateFrom": date_from, "recognitionDateTo": date_to, "token": token, "maxPerPage": 50}
+        data = await _coupang_get(path, urllib.parse.urlencode(q))
+        if str(data.get("code")) not in ("200", "SUCCESS"):
+            raise MarketApiError(f"쿠팡 매출내역 {data.get('code')} {str(data.get('message'))[:200]}")
+        out += data.get("data") or []
+        token = data.get("nextToken") or ""
+        if not data.get("hasNext") or not token:
+            break
+    return out
+
