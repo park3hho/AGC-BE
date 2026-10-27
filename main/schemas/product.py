@@ -12,6 +12,7 @@ class ProductCreate(BaseModel):
     photo_url: Optional[str] = Field(default=None, max_length=1000)
     title_cn: str = Field(max_length=300)
     title_ko: Optional[str] = Field(default=None, max_length=300)
+    photo_hover_url: Optional[str] = Field(default=None, max_length=1000)  # 대표이미지(전환용)
     photos: Optional[list[str]] = None  # 추가 사진 (대표 사진 제외), 최대 PHOTOS_MAX
     # 제품 정보 (리서치 때 함께 찾는다) — 비워도 된다
     manufacturer: Optional[str] = Field(default=None, max_length=300)
@@ -38,7 +39,7 @@ class ProductCreate(BaseModel):
     def validate_title_ko(cls, v):
         return clean_str(v)
 
-    @field_validator("photo_url")
+    @field_validator("photo_url", "photo_hover_url")
     @classmethod
     def validate_photo_url(cls, v):
         return check_photo_url(v)
@@ -56,6 +57,7 @@ class ProductUpdate(BaseModel):
     photo_url: Optional[str] = Field(default=None, max_length=1000)
     title_cn: Optional[str] = Field(default=None, max_length=300)
     title_ko: Optional[str] = Field(default=None, max_length=300)
+    photo_hover_url: Optional[str] = Field(default=None, max_length=1000)  # 대표이미지(전환용) · null 이면 비움
     photos: Optional[list[str]] = None  # 보내면 목록 전체 교체 · [] 이면 비움
     # 제품 정보 — 보낸 것만 바꾼다, "" 나 null 이면 비움
     manufacturer: Optional[str] = Field(default=None, max_length=300)
@@ -82,7 +84,7 @@ class ProductUpdate(BaseModel):
     def validate_title_ko(cls, v):
         return clean_str(v)
 
-    @field_validator("photo_url")
+    @field_validator("photo_url", "photo_hover_url")
     @classmethod
     def validate_photo_url(cls, v):
         return check_photo_url(v)

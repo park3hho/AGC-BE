@@ -8,6 +8,7 @@ class Product(BaseModel):
 
     code = fields.CharField(max_length=50, unique=True)            # 제품 코드
     photo_url = fields.CharField(max_length=1000, null=True)      # 제품 사진 (이미지 주소)
+    photo_hover_url = fields.CharField(max_length=1000, null=True)  # 대표이미지(전환용) — 자사몰 카드에 마우스를 올리면 바뀌는 두 번째 연출컷 (2026-10-27)
     photos = fields.JSONField(null=True)                          # 추가 사진 갤러리 — 주소 목록, 순서대로, 최대 10장 (대표 사진 제외)
     title_cn = fields.CharField(max_length=300)                   # 중국어 제목 (타오바오 원제)
     title_ko = fields.CharField(max_length=300, null=True)        # 한국어 제목 (판매용)
