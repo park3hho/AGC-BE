@@ -18,14 +18,15 @@ from models.order.order import MarketOrder, OrderEvent, OrderSyncRun
 from models.order.jiyun import JiyunShipment
 from models.order.purchase import TaobaoPurchase
 from services.order import market_clients as mc
+from services.order import shop_orders as so
 from services.order.pccc import (PcccInput, check_pccc, mask_name, mask_phone, norm_pccc, norm_phone, norm_zip,
                                  receiver_fingerprint)
 from utils.code_gen import CODE_ISSUE_RETRIES, ORDER_CODE_PREFIX, next_code
 
 logger = logging.getLogger(__name__)
 KST = timezone(timedelta(hours=9))
-MARKETS = ("naver", "coupang")
-MARKET_LABEL = {"naver": "네이버", "coupang": "쿠팡"}
+MARKETS = ("naver", "coupang", "shop")
+MARKET_LABEL = {"naver": "네이버", "coupang": "쿠팡", "shop": "자사몰"}
 FIRST_RANGE = timedelta(days=3)          # 처음 수집할 때 거슬러 올라갈 기간
 OVERLAP = timedelta(minutes=10)          # 지난 수집과 겹쳐 받는 구간 (빠짐 방지)
 MAX_RANGE = timedelta(days=31)
@@ -253,6 +254,8 @@ PROGRESS_STEPS = ("타오바오 구매", "판매처 발송", "집운 입고", "�
 def market_stage(o_or_line) -> str:
     status = o_or_line["market_status"] if isinstance(o_or_line, dict) else o_or_line.market_status
     market = o_or_line["market"] if isinstance(o_or_line, dict) else o_or_line.market
+    if market == "shop":
+        return so.SHOP_STAGE.get(status, "received")
     return (NAVER_STAGE if market == "naver" else COUPANG_STAGE).get(status, "received")
 
 
@@ -482,6 +485,9 @@ async def refresh_order(o: MarketOrder, actor: dict, reason: str) -> MarketOrder
             await mark_coupang_gone(o, actor, str(e))
             return await MarketOrder.get(id=o.id)
         lines = parse_coupang(box) if box else []
+    elif o.market == "shop":
+        row = await so.shop_order(o.order_no)
+        lines = so.parse_shop(row) if row else []
     else:
         items = await mc.naver_product_orders([o.ship_unit_no])
         lines = [ln for it in items for ln in parse_naver(it)]
@@ -543,7 +549,9 @@ async def collect_market(market: str, auth: dict | None, trigger: str = "manual"
         actor = actor_of(auth, trigger)
         run = await OrderSyncRun.create(market=market, trigger=trigger, actor_user_id=actor["actor_user_id"], range_from=start, range_to=end)
         try:
-            if market == "naver":
+            if market == "shop":
+                lines = [ln for row in await so.shop_orders_since(start, end) for ln in so.parse_shop(row)]
+            elif market == "naver":
                 ids = await mc.naver_changed_product_order_ids(start, end)
                 items = await mc.naver_product_orders(ids) if ids else []
                 lines = [ln for it in items for ln in parse_naver(it)]
@@ -588,6 +596,11 @@ async def order_poll_loop() -> None:
                 pass       # 이미 수집 중
             except Exception:
                 logger.exception(f"주문 자동 수집 실패: {m}")
+        try:   # 출고된 집운 기록의 통관 진행 (H B/L) — 자사몰 고객 화면 통관 단계
+            from services.order.customs import refresh_customs
+            await refresh_customs()
+        except Exception:
+            logger.exception("통관 진행 조회 실패")
 
 
 # ------------------------------------------------------------ 조회
@@ -628,6 +641,14 @@ def amount_of(o: MarketOrder, raw: dict | None) -> dict | None:
     · paid 고객 결제 · fee 수수료 · fee_detail [{label, amount}] · settlement 정산 예정 · estimated (수수료율로 계산했으면 true)"""
     if not raw:
         return None
+    if o.market == "shop":   # 자사몰 — 할인 없음, 결제 수수료 1% 추정 (카카오페이·네이버페이)
+        from core.pricing_config import DEFAULT_FEE_RATES, Platform
+        rate = float(DEFAULT_FEE_RATES[Platform.SHOP]["payment_fee_rate"])
+        total = o.total_price or 0
+        fee = round(total * rate / 100)
+        return {"total": total, "discount": 0, "discount_market": 0, "discount_seller": 0, "paid": total, "fee": fee,
+                "fee_detail": [{"label": "결제", "amount": fee}], "fee_rate": rate, "settlement": total - fee,
+                "estimated": True, "actual": False}
     if o.market == "naver":
         po = raw.get("productOrder") or {}
         total = _units(po.get("totalProductAmount"))
@@ -767,7 +788,17 @@ class OrderService:
         label = MARKET_LABEL.get(o.market, o.market)
         sent = {"market": o.market, "ship_unit_no": o.ship_unit_no, "market_status_before": o.market_status}
         try:
-            if o.market == "coupang":
+            if o.market == "shop":
+                # 자사몰 — 고객 즉시 취소를 막는다 (자사몰 단계 ordered → preparing). 고객이 먼저 취소했으면 실패
+                if not await so.set_shop_stage(o.ship_unit_no, "ordered", "preparing"):
+                    row = await so.shop_order(o.ship_unit_no)
+                    if row and row["status"] == "cancelled":
+                        why = "고객이 이미 취소했습니다"
+                    else:
+                        why = f"자사몰 주문이 결제 완료 상태가 아닙니다 ({row['status'] if row else '없음'}/{row['stage'] if row else '-'})"
+                    raise mc.MarketApiError(why)
+                res = {"result": {str(o.ship_unit_no): (True, "자사몰 주문 확인")}}
+            elif o.market == "coupang":
                 if o.market_status != "ACCEPT":
                     raise HTTPException(status_code=409, detail=f"쿠팡 상태가 결제완료(ACCEPT)가 아니라서 보낼 수 없습니다 (지금 {o.market_status}). 먼저 다시 수집해 주세요.")
                 res = await mc.coupang_acknowledge([o.ship_unit_no])
@@ -788,12 +819,40 @@ class OrderService:
             r.confirmed = True
             if r.market == "coupang":
                 r.market_status = "INSTRUCT"
+            elif r.market == "shop":
+                r.market_status = "CONFIRMED"
             await r.save(update_fields=["confirmed", "market_status", "updated_at"])
             await log_event(r, actor, "market_confirmed", f"{label} 발주확인 보냄 — 고객 화면 상품준비중", {
                 "sent": sent, "received": received,
                 "changes": {"confirmed": {"from": before["confirmed"], "to": True},
                             "market_status": {"from": before["market_status"], "to": r.market_status}},
             })
+        return await OrderService.get(order_id)
+
+    @staticmethod
+    async def mark_delivered(order_id: int, auth: dict) -> dict:
+        """자사몰 주문 배송 완료 표시 — 마켓 주문은 마켓이 알려 주지만 자사몰은 사람이 누른다 (국내 송장이 있어야).
+        자사몰 단계 preparing → delivered, 같은 주문의 AGC 줄 모두 완료."""
+        o = await MarketOrder.get_or_none(id=order_id)
+        if not o:
+            raise HTTPException(status_code=404, detail="주문을 찾지 못했습니다.")
+        if o.market != "shop":
+            raise HTTPException(status_code=400, detail="배송 완료 표시는 자사몰 주문만 합니다 (마켓 주문은 마켓 상태로 바뀝니다).")
+        if o.market_status == "DELIVERED":
+            return {**await OrderService.get(order_id), "already": True}
+        rows = await MarketOrder.filter(market="shop", ship_unit_no=o.ship_unit_no)
+        if not await JiyunShipment.filter(order_id__in=[r.id for r in rows], deleted_at=None, kr_tracking_no__isnull=False).exclude(kr_tracking_no="").exists():
+            raise HTTPException(status_code=409, detail="국내 송장이 있는 집운 기록이 없어 배송 완료로 표시할 수 없습니다.")
+        if not await so.set_shop_stage(o.ship_unit_no, "preparing", "delivered"):
+            raise HTTPException(status_code=409, detail="자사몰 주문이 주문 확인 상태가 아니라서 배송 완료로 바꿀 수 없습니다.")
+        actor = actor_of(auth)
+        for r in rows:
+            before = r.market_status
+            r.market_status = "DELIVERED"
+            await r.save(update_fields=["market_status", "updated_at"])
+            await log_event(r, actor, "delivered", "자사몰 배송 완료 표시 — 고객 화면 배송 완료",
+                            {"changes": {"market_status": {"from": before, "to": "DELIVERED"}}})
+            await restage(r, actor, "배송 완료")
         return await OrderService.get(order_id)
 
     @staticmethod

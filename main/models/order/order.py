@@ -9,7 +9,7 @@ class MarketOrder(BaseModel):
     개인정보(전화번호·주소·통관부호)와 마켓 원본 응답은 Fernet 암호문으로만 둔다 — 목록·로그에는 가린 값만."""
 
     code = fields.CharField(max_length=20, unique=True, null=True)  # 자사 주문 코드 OR-YYMMDD-XXXX (날짜 = 주문일 KST) — 수집할 때 발급
-    market = fields.CharField(max_length=10)                       # naver · coupang
+    market = fields.CharField(max_length=10)                       # naver · coupang · shop(자사몰, 2026-10-29)
     line_no = fields.CharField(max_length=60)                       # 마켓 안에서 유일한 줄 번호 (네이버 productOrderId · 쿠팡 shipmentBoxId-vendorItemId)
     order_no = fields.CharField(max_length=40)                      # 마켓 주문번호 (네이버 orderId · 쿠팡 orderId)
     ship_unit_no = fields.CharField(max_length=40)                  # 마켓에 처리(발주확인·발송)를 보낼 단위 (네이버 productOrderId · 쿠팡 shipmentBoxId)

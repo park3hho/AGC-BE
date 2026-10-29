@@ -16,7 +16,7 @@ router = APIRouter(prefix="/orders", tags=["Order"])
 # 주문에는 개인정보(수취인·통관부호)가 있어 order 권한이 따로 있다. 응답에는 가린 값만 나간다.
 # ⚠️ 이 파일의 로그에는 주문 원문·개인정보를 남기지 않는다.
 
-Market = Literal["naver", "coupang"]
+Market = Literal["naver", "coupang", "shop"]
 
 
 class CollectBody(BaseModel):
@@ -111,6 +111,19 @@ async def recheck_pccc(order_id: int, auth=Depends(require_feature(Feature.ORDER
         raise
     except Exception as e:
         raise _fail("통관부호 검증", e)
+
+
+@router.post("/{order_id}/delivered")
+async def mark_delivered(order_id: int, auth=Depends(require_feature(Feature.ORDER))):
+    """자사몰 주문 배송 완료 표시 (국내 송장 있는 집운 기록이 있어야)."""
+    try:
+        data = await OrderService.mark_delivered(order_id, auth)
+        logger.info(f"배송 완료 표시: order_id={order_id} by={auth['user_id']}")
+        return success(**data)
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise _fail("배송 완료 표시", e)
 
 
 @router.post("/{order_id}/confirm")

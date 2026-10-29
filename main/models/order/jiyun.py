@@ -32,6 +32,10 @@ class JiyunShipment(BaseModel):
     hbl = fields.CharField(max_length=60, null=True)                 # 국제 운송장 (House B/L) — UNI-PASS 통관 조회 번호
     kr_courier = fields.CharField(max_length=20, null=True)          # 국내 택배사 — core/shipping_config.COURIERS 키
     kr_tracking_no = fields.CharField(max_length=60, null=True)      # 국내 송장 — 마켓 발송처리에 쓴다
+    # 통관 — UNI-PASS API001 로 H B/L 을 자동 조회 (services/order/customs.py, 2026-10-29)
+    customs_status = fields.CharField(max_length=40, null=True)      # 관세청 통관진행상태 (조회되면 통관 중)
+    customs_cleared_at = fields.DatetimeField(null=True)             # 수입신고수리 · 반출 = 통관 완료
+    customs_checked_at = fields.DatetimeField(null=True)             # 마지막 조회
 
     memo = fields.TextField(null=True)
     created_by = fields.ForeignKeyField(
