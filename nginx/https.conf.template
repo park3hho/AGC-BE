@@ -101,6 +101,32 @@ server {
         return 503 '{"detail":"회계 서버가 꺼져 있어요"}';
     }
 
+    # HQ BE — 이도 회사 정보 정본 (C:\Users\iwill\HQ\BE, 컨테이너 hq_app) — /hq/ 아래를 넘긴다 (2026-10-29).
+    #   /hq/svc/ 는 서비스(AGC·FIN·MKT·SHOP) 전용 — 밖에서는 404. 서비스는 be_default 에서 http://hq_app:8000/svc/... 로 직접 부른다.
+    location ^~ /hq/svc/ {
+        return 404;
+    }
+    location = /hq {
+        return 301 /hq/;
+    }
+    location /hq/ {
+        resolver 127.0.0.11 valid=30s ipv6=off;
+        set $hq_upstream http://hq_app:8000;
+        rewrite ^/hq/(.*)$ /$1 break;
+        proxy_pass $hq_upstream;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_connect_timeout 5s;
+        proxy_read_timeout 60s;
+        error_page 502 504 = @hq_down;
+    }
+    location @hq_down {
+        default_type "application/json; charset=utf-8";
+        return 503 '{"detail":"HQ 서버가 꺼져 있어요"}';
+    }
+
     location / {
         # 'app' 은 같은 네트워크(be_default)의 MKT 컨테이너도 서비스 이름으로 갖고 있어 둘로 나뉘어 갔다 → 컨테이너 이름으로 고정.
         #   (2026-10-26 MKT 서비스 이름을 mkt_app 으로 바꿔 원인은 없어졌지만, 다른 서비스가 붙어도 안전하게 고정은 유지)
