@@ -18,6 +18,10 @@ class Product(BaseModel):
     allergens = fields.CharField(max_length=300, null=True)       # 알레르기 유발 성분 (예: 우유, 대두)
     shelf_life = fields.CharField(max_length=100, null=True)      # 소비기한 (예: 12개월)
     storage = fields.CharField(max_length=300, null=True)         # 보관 방법
+    # 분류 — 값 목록은 utils/category.py (2026-10-29)
+    category = fields.CharField(max_length=20, default="beverage")  # 대분류 beverage(음료) · tea(차, 우려 마시는)
+    subcategory = fields.CharField(max_length=20, null=True)      # 소분류 — 대분류마다 정해진 값
+    tea_form = fields.CharField(max_length=20, null=True)         # 형태 — 차만 (leaf 찻잎 · bag 티백 · coldbrew 냉침 티백 · powder 가루)
     deleted_at = fields.DatetimeField(null=True)                  # 소프트 삭제 시각 — 값이 있으면 목록·상세에서 숨김
 
     class Meta:

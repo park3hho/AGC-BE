@@ -2,9 +2,10 @@ from typing import Optional
 
 PHOTOS_MAX = 10  # 제품 추가 사진(갤러리) 최대 장수
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from schemas.common import check_photo_url, clean_str
+from utils.category import check_category
 
 
 class ProductCreate(BaseModel):
@@ -20,6 +21,17 @@ class ProductCreate(BaseModel):
     allergens: Optional[str] = Field(default=None, max_length=300)
     shelf_life: Optional[str] = Field(default=None, max_length=100)
     storage: Optional[str] = Field(default=None, max_length=300)
+    # 분류 (utils/category.py) — 소분류는 대분류와 같이 보낸다
+    category: Optional[str] = Field(default=None, max_length=20)
+    subcategory: Optional[str] = Field(default=None, max_length=20)
+    tea_form: Optional[str] = Field(default=None, max_length=20)  # 차만
+
+    @model_validator(mode="after")
+    def validate_category(self):
+        if "subcategory" in self.model_fields_set and "category" not in self.model_fields_set and self.subcategory is not None:
+            raise ValueError("소분류는 대분류(category)와 같이 보내 주세요.")
+        check_category(self.category, self.subcategory, self.tea_form)
+        return self
 
     @field_validator("manufacturer", "ingredients", "allergens", "shelf_life", "storage")
     @classmethod
@@ -65,6 +77,17 @@ class ProductUpdate(BaseModel):
     allergens: Optional[str] = Field(default=None, max_length=300)
     shelf_life: Optional[str] = Field(default=None, max_length=100)
     storage: Optional[str] = Field(default=None, max_length=300)
+    # 분류 (utils/category.py) — 소분류는 대분류와 같이 보낸다
+    category: Optional[str] = Field(default=None, max_length=20)
+    subcategory: Optional[str] = Field(default=None, max_length=20)
+    tea_form: Optional[str] = Field(default=None, max_length=20)  # 차만
+
+    @model_validator(mode="after")
+    def validate_category(self):
+        if "subcategory" in self.model_fields_set and "category" not in self.model_fields_set and self.subcategory is not None:
+            raise ValueError("소분류는 대분류(category)와 같이 보내 주세요.")
+        check_category(self.category, self.subcategory, self.tea_form)
+        return self
 
     @field_validator("manufacturer", "ingredients", "allergens", "shelf_life", "storage")
     @classmethod

@@ -102,8 +102,12 @@ class ProductService:
         raise HTTPException(status_code=409, detail="제품 코드 발급이 겹쳤습니다. 다시 시도해주세요.")
 
     @staticmethod
-    async def list(q: str | None, page: int, size: int) -> dict:
+    async def list(q: str | None, page: int, size: int, category: str | None = None, subcategory: str | None = None) -> dict:
         qs = alive_products()
+        if category:
+            qs = qs.filter(category=category)
+        if subcategory:
+            qs = qs.filter(subcategory=None if subcategory == "none" else subcategory)  # none = 소분류 안 정한 것
         if q:
             qs = qs.filter(Q(code__icontains=q) | Q(title_cn__icontains=q) | Q(title_ko__icontains=q))
         total = await qs.count()

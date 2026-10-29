@@ -25,6 +25,9 @@ def product_dict(p) -> dict:
         "allergens": p.allergens,
         "shelf_life": p.shelf_life,
         "storage": p.storage,
+        "category": p.category,
+        "subcategory": p.subcategory,
+        "tea_form": p.tea_form,
         "created_at": p.created_at.isoformat(),
         "updated_at": p.updated_at.isoformat(),
     }

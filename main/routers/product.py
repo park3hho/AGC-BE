@@ -7,6 +7,7 @@ from core.permissions import Feature
 from core.response_utils import success, success_only
 from schemas.product import ProductCreate, ProductUpdate
 from services.product.product_service import ProductService
+from utils.category import CATEGORIES
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/products", tags=["Product"])
@@ -28,15 +29,22 @@ async def list_products(
     q: str | None = Query(default=None, max_length=100),
     page: int = Query(default=1, ge=1),
     size: int = Query(default=20, ge=1, le=100),
+    category: str | None = Query(default=None, max_length=20),     # 대분류 (utils/category.py)
+    subcategory: str | None = Query(default=None, max_length=20),  # 소분류 · none = 안 정한 것
     auth=Depends(require_auth),
 ):
     try:
-        return success(**await ProductService.list(q.strip() if q else None, page, size))
+        return success(**await ProductService.list(q.strip() if q else None, page, size, category, subcategory))
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"제품 목록 조회 실패: {e}")
         raise HTTPException(status_code=500, detail="처리 중 오류가 발생했습니다.")
+
+
+@router.get("/categories")    # ★ /{product_id} 보다 먼저 — 분류 코드와 화면 이름 (utils/category.py)
+async def get_product_categories(auth=Depends(require_auth)):
+    return success(categories=CATEGORIES)
 
 
 @router.get("/next-code")    # ★ /{product_id} 보다 먼저 선언해야 한다
