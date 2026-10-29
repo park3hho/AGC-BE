@@ -299,10 +299,16 @@ async def progress_of(order_ids: list[int]) -> dict[int, dict]:
     for p in await TaobaoPurchase.filter(order_id__in=order_ids, deleted_at=None).exclude(cn_status="cancelled"):
         step = {"ordered": 0, "shipped": 1, "arrived": 2}.get(p.cn_status, 0)
         out[p.order_id] = max(out.get(p.order_id, 0), step)
+    jiyun: set[int] = set()      # 집운 기록 있음 — 모바일 '다음 할 일' 판정용 (2026-10-30)
+    tracking: set[int] = set()   # 국내 송장 있음
     for j in await JiyunShipment.filter(order_id__in=order_ids, deleted_at=None).exclude(status="cancelled"):
         step = 3 if j.status == "dispatched" else 2
         out[j.order_id] = max(out.get(j.order_id, 0), step)
-    return {oid: {"step": s, "label": PROGRESS_STEPS[s], "total": len(PROGRESS_STEPS)} for oid, s in out.items()}
+        jiyun.add(j.order_id)
+        if j.kr_tracking_no:
+            tracking.add(j.order_id)
+    return {oid: {"step": s, "label": PROGRESS_STEPS[s], "total": len(PROGRESS_STEPS),
+                  "jiyun": oid in jiyun, "tracking": oid in tracking} for oid, s in out.items()}
 
 
 async def upsert_line(line: dict, actor: dict, run) -> str:
