@@ -26,7 +26,6 @@ from routers import (
     detail_page,
     exchange_rate,
     health,
-    internal,
     listing,
     price_survey,
     pricing,
@@ -79,7 +78,6 @@ app.include_router(users.router)
 app.include_router(company_account.router)
 app.include_router(api_credential.router)
 app.include_router(company_info.router)
-app.include_router(internal.router)        # /internal/company — FIN·MKT·SHOP 서비스 키 전용, nginx 에서 차단
 app.include_router(shipping_address.router)
 app.include_router(order_document.router)   # /orders/{id}/documents — /orders/{id} 보다 먼저
 app.include_router(order.router)

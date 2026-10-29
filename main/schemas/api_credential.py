@@ -4,7 +4,6 @@ from typing import Optional
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
-from core.internal_services import clean_shared_with
 from schemas.company_account import _clean_url, _required_text
 
 LABEL_MAX = 50
@@ -77,12 +76,6 @@ class _Common(BaseModel):
     reauth_to: Optional[date] = None
     allowed_ips: list[str] = Field(default_factory=list)
     memo: Optional[str] = Field(default=None, max_length=2000)
-    shared_with: list[str] = Field(default_factory=list)      # 조회 가능한 다른 서비스 (fin·mkt·shop)
-
-    @field_validator("shared_with", mode="before")
-    @classmethod
-    def validate_shared(cls, v):
-        return clean_shared_with(v)
 
     @field_validator("url")
     @classmethod

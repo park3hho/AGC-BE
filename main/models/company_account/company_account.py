@@ -12,7 +12,6 @@ class CompanyAccount(BaseModel):
     password_enc = fields.TextField()                             # Fernet 암호문 (core/account_crypto.py) — 목록·로그 노출 금지
     usages = fields.JSONField(default=list)                       # 용도 문자열 배열 (예: ["판매", "정산"])
     memo = fields.TextField(null=True)                            # 비고 (예: 연동된 휴대폰 번호) — 비밀값은 넣지 않는다
-    shared_with = fields.JSONField(default=list)                  # 조회할 수 있는 다른 서비스 ["fin", "mkt", "shop"] (core/internal_services.py)
     created_by = fields.ForeignKeyField(
         "models.User", related_name="created_company_accounts", null=True, on_delete=fields.SET_NULL
     )

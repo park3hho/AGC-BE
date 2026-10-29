@@ -16,7 +16,6 @@ class ApiCredential(BaseModel):
     reauth_to = fields.DateField(null=True)                       # 재인증 기간 끝 — 놓치면 정지
     allowed_ips = fields.JSONField(default=list)                  # 호출 허용 IP 목록
     memo = fields.TextField(null=True)
-    shared_with = fields.JSONField(default=list)                  # 조회할 수 있는 다른 서비스 ["fin", "mkt", "shop"] (core/internal_services.py)
     created_by = fields.ForeignKeyField(
         "models.User", related_name="created_api_credentials", null=True, on_delete=fields.SET_NULL
     )

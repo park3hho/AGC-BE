@@ -17,7 +17,6 @@ def account_dict(a) -> dict:
         "url": a.url,
         "usages": a.usages or [],
         "memo": a.memo,
-        "shared_with": a.shared_with or [],
         "created_at": a.created_at.isoformat(),
         "updated_at": a.updated_at.isoformat(),
     }
@@ -56,7 +55,6 @@ class CompanyAccountService:
             usages=body.usages,
             url=body.url,
             memo=body.memo,
-            shared_with=body.shared_with,
             created_by_id=actor_id,
         )
         return account_dict(a)

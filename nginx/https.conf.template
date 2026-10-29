@@ -101,15 +101,6 @@ server {
         return 503 '{"detail":"회계 서버가 꺼져 있어요"}';
     }
 
-    # 내부 API (회사 정보 중앙화, 2026-10-29) — FIN·MKT·SHOP 이 Docker 네트워크에서 http://agc_app:8000/internal/... 로만 부른다.
-    #   밖(Cloudflare Tunnel · 443)에서는 없는 경로처럼 404. 앱도 nginx 를 거친 요청(X-Real-IP)을 404 로 막는다 (core/auth_deps.require_service).
-    location ^~ /internal/ {
-        return 404;
-    }
-    location = /internal {
-        return 404;
-    }
-
     location / {
         # 'app' 은 같은 네트워크(be_default)의 MKT 컨테이너도 서비스 이름으로 갖고 있어 둘로 나뉘어 갔다 → 컨테이너 이름으로 고정.
         #   (2026-10-26 MKT 서비스 이름을 mkt_app 으로 바꿔 원인은 없어졌지만, 다른 서비스가 붙어도 안전하게 고정은 유지)
