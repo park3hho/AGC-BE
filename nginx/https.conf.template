@@ -78,6 +78,29 @@ server {
         return 503 '{"detail":"자사몰 서버가 꺼져 있어요"}';
     }
 
+    # FIN BE — 회사 회계 (C:\Users\iwill\FIN\BE, 컨테이너 fin_app) — /fin/ 아래를 넘긴다 (2026-10-29).
+    #   MKT · SHOP 과 같은 방식. 은행 거래내역 조회(CODEF)는 은행 응답을 기다려야 해서 read 는 120초.
+    location = /fin {
+        return 301 /fin/;
+    }
+    location /fin/ {
+        resolver 127.0.0.11 valid=30s ipv6=off;
+        set $fin_upstream http://fin_app:8000;
+        rewrite ^/fin/(.*)$ /$1 break;
+        proxy_pass $fin_upstream;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_connect_timeout 5s;
+        proxy_read_timeout 120s;
+        error_page 502 504 = @fin_down;
+    }
+    location @fin_down {
+        default_type "application/json; charset=utf-8";
+        return 503 '{"detail":"회계 서버가 꺼져 있어요"}';
+    }
+
     location / {
         # 'app' 은 같은 네트워크(be_default)의 MKT 컨테이너도 서비스 이름으로 갖고 있어 둘로 나뉘어 갔다 → 컨테이너 이름으로 고정.
         #   (2026-10-26 MKT 서비스 이름을 mkt_app 으로 바꿔 원인은 없어졌지만, 다른 서비스가 붙어도 안전하게 고정은 유지)
