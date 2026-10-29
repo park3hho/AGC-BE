@@ -35,7 +35,7 @@ def hash_api_key(raw: str) -> str:
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
 
-async def _user_from_api_key(raw: str) -> User | None:
+async def _active_key(raw: str) -> ApiKey | None:
     key = await ApiKey.get_or_none(key_hash=hash_api_key(raw.strip()), active=True).select_related("user")
     if not key or not key.user.active:
         return None
@@ -43,7 +43,15 @@ async def _user_from_api_key(raw: str) -> User | None:
     if key.last_used_at is None or now - key.last_used_at > _API_KEY_TOUCH_EVERY:
         key.last_used_at = now
         await key.save(update_fields=["last_used_at"])
-    return key.user
+    return key
+
+
+async def _user_from_api_key(raw: str) -> User | None:
+    key = await _active_key(raw)
+    if key and key.service:
+        # 서비스 키(fin·mkt·shop)는 /internal/company 전용 — 일반 API 에서는 쓸 수 없다
+        raise HTTPException(status_code=403, detail="서비스 키로는 쓸 수 없는 API 입니다.")
+    return key.user if key else None
 
 
 def start_session(request: Request, user: User, remember: bool) -> None:
@@ -86,6 +94,22 @@ async def require_auth(request: Request) -> dict:
     if not user:
         raise HTTPException(status_code=401, detail="로그인이 필요합니다.")
     return {"user_id": user.id, "role": user.role, "user": user, "via_api_key": False}
+
+
+async def require_service(request: Request) -> dict:
+    """/internal/company 전용 — 서비스 키(api_key.service)만 통과. 사람 세션·일반 API 키는 401/403.
+    nginx 를 거친 요청(X-Real-IP · X-Forwarded-For)은 밖에서 온 것이라 404 — nginx 차단과 같이 이중으로 막는다."""
+    if request.headers.get("x-real-ip") or request.headers.get("x-forwarded-for"):
+        raise HTTPException(status_code=404, detail="Not Found")
+    raw = request.headers.get(API_KEY_HEADER)
+    if not raw:
+        raise HTTPException(status_code=401, detail="서비스 키가 필요합니다.")
+    key = await _active_key(raw)
+    if not key:
+        raise HTTPException(status_code=401, detail="API 키가 올바르지 않거나 폐기되었습니다.")
+    if not key.service:
+        raise HTTPException(status_code=403, detail="서비스 키가 아닙니다.")
+    return {"service": key.service, "user_id": key.user_id, "key_id": key.id}
 
 
 def require_feature(feature: Feature):

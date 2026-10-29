@@ -22,6 +22,7 @@ def credential_dict(c, secrets) -> dict:
         "reauth_to": c.reauth_to.isoformat() if c.reauth_to else None,
         "allowed_ips": c.allowed_ips or [],
         "memo": c.memo,
+        "shared_with": c.shared_with or [],
         "created_at": c.created_at.isoformat(),
         "updated_at": c.updated_at.isoformat(),
     }

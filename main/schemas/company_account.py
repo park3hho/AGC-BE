@@ -3,6 +3,8 @@ from urllib.parse import urlsplit
 
 from pydantic import BaseModel, Field, field_validator
 
+from core.internal_services import clean_shared_with
+
 USAGE_MAX_LEN = 30
 USAGES_MAX = 10
 URL_MAX_LEN = 500
@@ -59,6 +61,12 @@ class CompanyAccountCreate(BaseModel):
     usages: list[str] = Field(default_factory=list)
     url: Optional[str] = Field(default=None, max_length=URL_MAX_LEN + 8)   # 홈페이지 — 없어도 됨
     memo: Optional[str] = Field(default=None, max_length=MEMO_MAX_LEN)     # 비고 — 없어도 됨
+    shared_with: list[str] = Field(default_factory=list)                  # 조회 가능한 다른 서비스 (fin·mkt·shop)
+
+    @field_validator("shared_with")
+    @classmethod
+    def validate_shared(cls, v):
+        return clean_shared_with(v)
 
     def __repr__(self) -> str:      # 로그·오류 메시지에 비밀번호가 찍히지 않게
         return f"CompanyAccountCreate(platform={self.platform!r}, login_id={self.login_id!r}, usages={self.usages!r})"
@@ -95,6 +103,12 @@ class CompanyAccountUpdate(BaseModel):
     usages: Optional[list[str]] = None
     url: Optional[str] = Field(default=None, max_length=URL_MAX_LEN + 8)
     memo: Optional[str] = Field(default=None, max_length=MEMO_MAX_LEN)     # null/"" = 지움
+    shared_with: Optional[list[str]] = None                               # 보내면 그 목록으로 바꾼다 ([] = 공유 끄기)
+
+    @field_validator("shared_with")
+    @classmethod
+    def validate_shared(cls, v):
+        return clean_shared_with(v)
 
     def __repr__(self) -> str:
         return f"CompanyAccountUpdate(fields={sorted(self.model_fields_set)!r})"

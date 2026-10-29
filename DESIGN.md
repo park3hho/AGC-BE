@@ -493,6 +493,29 @@ detail_page_common (행 1개, id=1 — S6 해외구매대행 안내 + 등록번�
 - 하자·오배송·설명과 다름의 반품비는 판매자 부담(전자상거래법 §18). 단순변심만 실비 청구, 반품위약금·보관비 등 추가 청구 금지.
 - 무료배송에 조건(제주·도서산간 추가비 등)을 붙이려면 상세페이지 S6 와 무료배송 띠 문구도 같이 고친다.
 
+
+### 6.8 회사 정보 중앙화 · 내부 API (2026-10-29)
+
+회사 계정·API 키는 **AGC DB 한 곳**에만 둔다. 같은 PC 의 FIN · MKT · SHOP 은 자기 DB 에 사본을 두지 않고 AGC 내부 API 로 조회한다.
+조사 자료: 바탕화면 `EIDO_회사계정·키_통합_서비스별현황/` (서비스별 현황 4개).
+
+- **공유 범위**: `company_account.shared_with`, `api_credential.shared_with` (jsonb, 예 `["fin"]`). 비어 있으면 AGC 사람만 본다. 값은 `core/internal_services.SERVICES` (fin · mkt · shop) — FE `constants/accountConst.SHARE_SERVICES` 와 같아야 한다. 화면: 회사 정보 › 로그인 계정 · API 키 폼의 "공유 서비스".
+- **서비스 키**: `api_key.service` 가 채워진 X-API-Key. 사용자 `svc-fin` · `svc-mkt` · `svc-shop` (키 전용, 화면 로그인 불가).
+  - 발급: `python -m scripts.api_key create --service fin --out /tmp/k` → 원문을 그 서비스 `BE/.env` 의 `AGC_SERVICE_KEY` 로 옮기고 파일 삭제. 같은 .env 에 `AGC_INTERNAL_URL=http://agc_app:8000/internal/company`.
+  - 서비스 키로 일반 API 를 부르면 403. 일반 키(리서처)로 /internal 을 부르면 403.
+- **경로** (`routers/internal.py`, include_in_schema=False)
+  - `GET /internal/company/accounts` — 공유된 계정 목록 (비밀번호 없음)
+  - `GET /internal/company/accounts/{id}/password` — 복호화 + `company_account_password_view` 에 svc 사용자로 기록
+  - `GET /internal/company/api-credentials` — 공유된 API 키 목록 (비밀값은 label 만)
+  - `GET /internal/company/api-credentials/{id}/values` — `{public: {label: value}, secrets: {label: 평문}}` + 비밀값마다 `api_credential_secret_view` 기록
+  - 공유 안 된 행은 404 (있는지도 알리지 않음). 기록을 못 남기면 값도 안 준다.
+- **밖에서 차단 (이중)**: nginx `location ^~ /internal/ { return 404; }` + 앱에서 `X-Real-IP`·`X-Forwarded-For` 가 있는(=nginx 를 거친) 요청은 404 (`core/auth_deps.require_service`). 내부 호출은 Docker 네트워크 be_default 에서 `agc_app:8000` 으로 직접.
+- **이전 (1회, 2026-10-29)**: `scripts/import_company_accounts.py` — 보내는 쪽이 자기 키로 풀어 JSON 을 stdin 으로 넘기고, AGC 키로 다시 암호화. 같은 계정(merge_into 또는 platform+login_id)은 AGC 비밀번호를 유지하고 shared_with 만 합친다.
+  - FIN 4건: CODEF API(23, fin) · FIN 회사 회계 admin(24, 공유 없음) · KB기업 공동인증서(10 에 합침, 비밀번호 같음) · KB 개인 공동인증서(25, fin)
+  - MKT 3건(살아 있는 것만): 네이버 블로그(26) · 인스타그램(27) · 스레드(28), 모두 mkt. MKT 의 삭제된 4행은 옮기지 않음
+  - SHOP: 자사몰 API 키 4개(5~8)에 shop 표시. SHOP 코드는 아직 .env 를 읽는다
+- **아직 각 서비스가 할 일**: FIN·MKT 는 자기 표 대신 이 API 를 부르게 바꾸고, 확인 뒤 자기 사본(password_enc)을 지운다. SHOP 은 AGC 가 꺼져도 결제가 멈추지 않게 마지막 값을 보관하는 방식으로 붙인다. .env 변경은 컨테이너 재생성(up -d) 후 반영.
+
 ## 7. 환경 · 실행
 
 **.env**

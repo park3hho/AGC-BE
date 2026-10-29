@@ -27,6 +27,8 @@ class ApiKey(BaseModel):
     key_hash = fields.CharField(max_length=64, unique=True)       # sha256(원문) hex
     active = fields.BooleanField(default=True)                    # False = 폐기
     last_used_at = fields.DatetimeField(null=True)                # 마지막 사용 시각
+    # 서비스 키 (fin · mkt · shop) — 채워져 있으면 /internal/company 전용, 일반 API 는 403 (core/internal_services.py)
+    service = fields.CharField(max_length=20, null=True)
 
     class Meta:
         table = "api_key"
