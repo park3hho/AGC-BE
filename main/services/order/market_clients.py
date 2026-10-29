@@ -102,6 +102,7 @@ async def naver_product_orders(ids: list[str]) -> list[dict]:
 # ---------------------------------------------------------------- 쿠팡
 COUPANG_BASE = "https://api-gateway.coupang.com"
 COUPANG_SERVICE = "쿠팡 OpenAPI"
+COUPANG_429_WAITS = (3, 8, None)                     # 429 면 3초 → 8초 기다렸다 다시, 세 번째도 429 면 실패
 COUPANG_RECEIVE_STATUSES = ("ACCEPT", "INSTRUCT")      # 결제완료 · 상품준비중 — 접수 단계
 
 
@@ -112,7 +113,17 @@ async def _coupang_call(method: str, path: str, query: str = "", body: dict | No
     auth = f"CEA algorithm=HmacSHA256, access-key={secrets['Access Key']}, signed-date={dt}, signature={sig}"
     url = f"{COUPANG_BASE}{path}" + (f"?{query}" if query else "")
     data = json.dumps(body).encode() if body is not None else None
-    return await http(method, url, {"Authorization": auth, "Content-Type": "application/json;charset=UTF-8"}, data)
+    # 429(요청 많음)는 잠깐 기다렸다 다시 — 서명 시각이 바뀌어야 해서 다시 부를 때마다 새로 서명한다 (2026-10-29)
+    for wait in COUPANG_429_WAITS:
+        try:
+            return await http(method, url, {"Authorization": auth, "Content-Type": "application/json;charset=UTF-8"}, data)
+        except MarketApiError as e:
+            if not str(e).startswith("HTTP 429") or wait is None:
+                raise
+        await asyncio.sleep(wait)
+        dt = datetime.now(timezone.utc).strftime("%y%m%dT%H%M%SZ")
+        sig = hmac.new(secrets["Secret Key"].encode(), (dt + method + path + query).encode(), hashlib.sha256).hexdigest()
+        auth = f"CEA algorithm=HmacSHA256, access-key={secrets['Access Key']}, signed-date={dt}, signature={sig}"
 
 
 async def _coupang_get(path: str, query: str) -> dict:
