@@ -5,7 +5,7 @@ from typing import Optional
 from pydantic import BaseModel, Field, field_validator
 
 from core.purchase_config import CHARGED_STATUS, CN_STATUS, PAY_CURRENCY, PAY_METHOD, PURCHASE_ITEMS_MAX
-from schemas.company_account import _clean_url
+from schemas.common import _clean_url
 
 
 class PurchaseItemIn(BaseModel):

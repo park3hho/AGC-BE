@@ -227,9 +227,9 @@ async def lifespan(app: FastAPI):
 
 - role 은 **DB 우선** 조회 → 관리자가 권한을 내리면 다음 요청부터 즉시 반영.
 - 사용자 관리 규칙: 자기 자신 비활성화·자기 역할 변경 금지, 마지막 활성 관리자는 비활성화·강등 금지. 비밀번호를 바꾸면 `session_version` +1 → 그 사용자의 기존 세션 모두 401.
-- **회사 계정 비밀번호**: Fernet 암호문(`password_enc`)으로만 저장. 목록·등록 응답에 넣지 않고 `GET /company-accounts/{id}/password` 로 한 건씩만 복호화 → 그때마다 `company_account_password_view` 에 기록 (기록 실패 시 비밀번호도 안 줌).
+- **회사 계정 비밀번호·API 키**: HQ 로 옮김 (2026-10-30, §6.2). `ACCOUNT_SECRET_KEY` (Fernet) 는 이제 **주문 개인정보**(전화·주소·통관부호·마켓 원본) 암호화에만 쓴다 (`core/account_crypto.py`).
   - 회사 계정 라우터 로그에는 `str(e)` 대신 예외 종류만 남긴다 (DB 오류 메시지에 행 값이 섞일 수 있음). 스키마 `__repr__` 도 비밀번호를 뺀다.
-  - ⚠️ `ACCOUNT_SECRET_KEY` 를 잃으면 저장된 비밀번호를 복구할 수 없다 → `.env` 와 별도로 PC 밖 안전한 곳에 백업. `pg_dump` 백업과 **같은 곳에 두지 않는다** (둘 다 새면 평문과 같다).
+  - ⚠️ `ACCOUNT_SECRET_KEY` 를 잃으면 암호화해 둔 주문 개인정보를 복구할 수 없다 → `.env` 와 별도로 PC 밖 안전한 곳에 백업. `pg_dump` 백업과 **같은 곳에 두지 않는다** (둘 다 새면 평문과 같다).
 - 데이터를 바꾸는 엔드포인트는 `require_auth` 로 두지 않는다 — 로그인만으로 누구나 호출 가능해진다.
 - Feature 이름은 FE `constants/permissions.js` 와 문자열로 동기화한다.
 
@@ -291,11 +291,10 @@ product (제품) 1 ──< N price_survey (가격 조사) 1 ──< N price_surv
 - **소프트 삭제**: `DELETE` 는 `deleted_at` 만 채운다. 조회는 `alive_products()` · `alive_surveys()` (제품이 삭제된 조사도 숨김)로만 한다. 코드 발급(`next_code`)은 삭제된 행까지 봐서 코드를 다시 쓰지 않는다.
 - **사진 주소로 저장** (`POST /uploads/photos/from-url`): BE 가 받아 온다 → 연결 전 호스트를 IP 로 풀어 공인 주소만 허용, 리다이렉트는 직접 따라가며 매번 다시 검사 (최대 3번), 15초 · 10MB 제한. 표준 라이브러리 `urllib` 만 쓴다 (의존성 추가 없음).
 
-### 6.2 계정 · 회사 계정 (2026-10-18)
+### 6.2 계정 (2026-10-18) — 회사 계정은 HQ (2026-10-30)
 
 ```
-app_user 1 ──< N company_account (created_by, 사용자 삭제 시 NULL)
-app_user 1 ──< N company_account_password_view >── 1 company_account
+app_user 1 ──< N api_key (자동화용 X-API-Key)
 ```
 
 **`app_user` — 로그인 계정** (`models/user/user.py`, 테이블명은 Postgres 예약어 `user` 를 피함)
@@ -308,44 +307,10 @@ app_user 1 ──< N company_account_password_view >── 1 company_account
 | `active` | bool | ✅ | false = 사용 중지 (다음 요청부터 401) |
 | `session_version` | int | ✅ | 비밀번호 변경 시 +1 → 기존 세션 무효 |
 
-**`company_account` — 회사 외부 서비스 계정** (`models/company_account/company_account.py`)
-| 컬럼 | 타입 | 필수 | 뜻 |
-|---|---|---|---|
-| `platform` | varchar(100) | ✅ | 플랫폼 (타오바오·쿠팡·네이버 스마트스토어 등) |
-| `login_id` | varchar(200) | ✅ | 그 플랫폼의 아이디 |
-| `password_enc` | text | ✅ | Fernet 암호문 — 목록·로그 금지 |
-| `usages` | jsonb | ✅ | 용도 문자열 배열 (`?usage=` 는 jsonb `@>` 로 정확히 일치) |
-| `created_by_id` | FK → app_user (SET NULL) | | 추가한 사람 |
-
-**`company_account_password_view` — 비밀번호 열람 기록** (지우지 않는다)
-| 컬럼 | 타입 | 필수 | 뜻 |
-|---|---|---|---|
-| `account_id` | FK → company_account (CASCADE) | ✅ | 어느 계정 |
-| `user_id` | FK → app_user (RESTRICT) | ✅ | 누가 — 열람 기록이 있는 사용자는 지울 수 없다 (비활성화만) |
-| `ip` | varchar(64) | | 요청 IP |
-| `created_at` | timestamptz | ✅ | 언제 |
-
-**회사 정보 = 기본 정보 · 로그인 계정 · API 키** (2026-10-23). 세 개념은 만료일 유무가 아니라 **무엇인지**로 나눈다:
-로그인 계정 = 아이디·비밀번호로 들어가는 것, API 키 = 비밀값(열람 기록)·재인증·허용 IP 가 있는 키, 기본 정보 = 그 밖의 회사 정보 전부 (번호·계좌·연락처·서류, 값은 숨기지 않음).
-
-**`company_info` — 기본 정보 1건** (`models/company_account/company_info.py`)
-| 컨럼 | 타입 | 필수 | 뜻 |
-|---|---|---|---|
-| `category` | varchar(30) | ✅ | 분류 — 자유 입력 (사업자 · 인허가·신고 · 계좌 · 연락처 · 서류) |
-| `name` | varchar(100) | ✅ | 이름 |
-| `value` | varchar(500) | | 대표 값. 서류처럼 파일만 있으면 비움 |
-| `details` | jsonb | ✅ | 세부 값 `[{label, value}]` |
-| `issuer` · `issued_on` · `expires_on` | | | 발급기관 · 발급일 · 만료일 |
-| `remind` | bool | ✅ | 만료 임박 시 홈 할 일에 띄움 (납세증명서처럼 다시 떼는 서류는 false) |
-| `url` | varchar(500) | | 관련 사이트 |
-| `link` | varchar(50) | | 앱에서 쓰는 곳 (`core/company_info_config.INFO_LINKS`). 살아 있는 항목 중 하나에만 (서비스에서 409) |
-| `sort` | smallint | ✅ | 분류 안 순서 |
-| `deleted_at` | timestamptz | | 소프트 삭제 |
-
-**`company_info_file` — 기본 정보에 붙인 서류** — `PRIVATE_DIR/company_info/YYYY/{임의}.{pdf|jpg|png|webp}` 에 저장. **`/files` (공개 StaticFiles) 로 내리지 않고** `GET /company-info/{id}/files/{file_id}` 가 `account_view` 확인 후 내려준다 (주민번호·계좌가 든 서류). 형식은 앞부분 바이트로 판단, 20MB, 항목당 10개.
-
-- **상세페이지 등록번호 연결**: `link = food_agency_reg_no` 항목이 있으면 `detail_page_common.reg_no` 는 그 값을 따른다. 항목을 추가·수정하면 `DetailPageService.sync_linked_reg_no` 가 값을 맞추고(바뀌면 승인된 상세페이지는 검수 대기로), `PUT /detail-pages/common` 은 보낸 `reg_no` 대신 연결 값을 쓴다. 연결 항목을 지우면 마지막 값이 남고 S6 에서 다시 고칠 수 있다.
-
+**회사 계정 · API 키 · 기본 정보 → HQ 로 옮김 (2026-10-30)** — 표 `company_account`(+`_password_view`) · `api_credential`(+`_secret`, `_secret_view`) · `company_info`(+`_file`) 는 migration 37 로 지웠다. 정본·화면은 HQ (eido-hq, `C:\Users\iwill\HQ`). AGC 는 `services/hq_client.py` 로 HQ `/svc` 를 읽는다:
+- 마켓·UNI-PASS 키 = `credential_values(code)` (naver_commerce · coupang_openapi · unipass), S6 등록번호 = `linked_value('food_agency_reg_no')`. 메모리 10분 보관, HQ 실패 시 마지막 값.
+- S6 등록번호가 HQ 값과 다르면 읽을 때 맞추고 승인된 상세페이지를 검수 대기로 (`detail_page_service._common_synced` — 예전 `sync_linked_reg_no` 대신).
+- 홈 할 일 날짜 = `GET /company-reminders`. 지우기 직전 사본: `C:\Users\iwill\Eido\backup\agc_company_tables_2026-10-30`.
 ### 6.3 가격 책정 (2026-10-19)
 
 ```
@@ -505,7 +470,7 @@ detail_page_common (행 1개, id=1 — S6 해외구매대행 안내 + 등록번�
 | `ENV` | `dev` / `production` |
 | `ENABLE_DOCS` | `1` 이면 `/docs` 공개 (dev 전용) |
 | `SESSION_MAX_AGE_SEC` | 세션 유효기간 override (선택) |
-| `ACCOUNT_SECRET_KEY` | 회사 계정 비밀번호 암호화 키 (Fernet). 만들기: `openssl rand -base64 32 \| tr '+/' '-_'`. **바꾸거나 잃으면 기존 비밀번호 복호화 불가** — 별도 백업 (§5) |
+| `ACCOUNT_SECRET_KEY` | 주문 개인정보 암호화 키 (Fernet). 만들기: `openssl rand -base64 32 \| tr '+/' '-_'`. **바꾸거나 잃으면 기존 주문 개인정보 복호화 불가** — 별도 백업 (§5) |`n| `HQ_URL` · `HQ_SERVICE_KEY` | HQ(회사 정보 정본) 서비스 API 주소·키 — `services/hq_client.py` (2026-10-30). 값은 로그·커밋 금지 |
 | `BE_DOMAIN` | BE 공개 주소 — 도메인 또는 공인 IP (현재 공인 IP, 도메인 없음). nginx 가 사용. 비어 있으면 nginx 는 발급용 http 만 연다 |
 | `SESSION_SAME_SITE` | production 쿠키 SameSite. `lax` 권장 (Vercel rewrite 로 같은 출처). FE 가 다른 도메인에서 BE 를 직접 부르면 `none` |
 | `TZ` | `Asia/Seoul` |

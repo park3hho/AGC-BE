@@ -4,7 +4,7 @@ from typing import Literal, Optional
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 from core.shipping_config import COURIERS
-from schemas.company_account import _required_text
+from schemas.common import _required_text
 
 Use = Literal["outbound", "return"]       # 출고지 · 반품(교환)지
 CODES_MAX = 20

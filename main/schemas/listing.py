@@ -4,7 +4,7 @@ from typing import Optional
 from pydantic import BaseModel, Field, field_validator
 
 from core.pricing_config import Platform
-from schemas.company_account import _clean_url
+from schemas.common import _clean_url
 
 
 def _blank(v):
