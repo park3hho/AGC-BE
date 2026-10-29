@@ -20,6 +20,8 @@ from core.shipping_config import (
     SHIPPING_SERVICE_LABEL,
     SHIPPING_STEP_CNY,
     SHIPPING_STEP_KG,
+    TEA_BOX_CM,
+    VOLUMETRIC_DIVISOR,
 )
 from models.product.price_survey import PriceSurveyOption
 from services.pricing.exchange_rate_service import ExchangeRateService
@@ -47,16 +49,33 @@ def shipping_cny_for(billable: Decimal) -> Decimal:
     return SHIPPING_FIRST_CNY + steps * SHIPPING_STEP_CNY
 
 
-def option_shipping(option1: str, option2: Optional[str]) -> dict:
-    """옵션 1개의 배송비. 용량을 못 읽으면 값이 전부 null (배송비 계산 불가)."""
+def dim_weight_g(n: int = 1) -> int:
+    """차(tea) 상자 N개의 부피 무게(g) — core/shipping_config 부피 무게."""
+    a, b, c = TEA_BOX_CM
+    return int(Decimal(a * b * c * n) * 1000 / VOLUMETRIC_DIVISOR)
+
+
+def _weights(volume: Optional[int], n: int, category: str) -> tuple[Optional[int], Optional[int], Optional[int]]:
+    """(실제 무게, 부피 무게, 계산에 쓸 무게) g. 음료는 실제 무게만. 차는 둘 중 큰 값 — 용량을 못 읽어도 부피 무게로 잡는다."""
+    actual = volume * n * G_PER_ML + BOX_WEIGHT_G if volume is not None else None
+    if category != "tea":
+        return actual, None, actual
+    dim = dim_weight_g(n)
+    return actual, dim, max(actual or 0, dim)
+
+
+def option_shipping(option1: str, option2: Optional[str], category: str = "beverage") -> dict:
+    """옵션 1개의 배송비. 용량을 못 읽으면 값이 전부 null (배송비 계산 불가) — 차는 부피 무게로 계산한다."""
     volume = parse_volume_ml(option1, option2)
-    if volume is None:
-        return {"volume_ml": None, "weight_g": None, "billable_kg": None, "shipping_cny": None, "over_limit": False}
-    weight = volume * G_PER_ML + BOX_WEIGHT_G
+    actual, dim, weight = _weights(volume, 1, category)
+    if weight is None:
+        return {"volume_ml": None, "weight_g": None, "dim_weight_g": None, "billable_kg": None,
+                "shipping_cny": None, "over_limit": False}
     billable = billable_kg(weight)
     return {
         "volume_ml": volume,
-        "weight_g": weight,
+        "weight_g": actual,
+        "dim_weight_g": dim,          # 부피 무게 (차만) — 계산 무게는 실제·부피 중 큰 값
         "billable_kg": _kg(billable),
         "shipping_cny": money_cny(shipping_cny_for(billable)),
         "over_limit": billable > SHIPPING_MAX_KG,
@@ -93,12 +112,12 @@ def shipping_brackets() -> list[dict]:
     return rows
 
 
-def option_dict(o: PriceSurveyOption) -> dict:
-    """가격 책정 · 배송비 화면 공통 옵션 모양 (옵션 + 배송비)."""
+def option_dict(o: PriceSurveyOption, category: str = "beverage") -> dict:
+    """가격 책정 · 배송비 화면 공통 옵션 모양 (옵션 + 배송비). category = 제품 대분류 (차는 부피 무게)."""
     return {
         "id": o.id, "option1": o.option1, "option2": o.option2,
         "price_cny": money_cny(o.price_cny), "photo_url": o.photo_url,
-        **option_shipping(o.option1, o.option2),
+        **option_shipping(o.option1, o.option2, category),
     }
 
 
@@ -109,7 +128,7 @@ def bundle_key(option_id: int, n: int) -> str:
     return str(option_id) if n == 1 else f"{option_id}x{n}"
 
 
-def bundle_option_dict(o: PriceSurveyOption, n: int, suggested: bool = False) -> dict:
+def bundle_option_dict(o: PriceSurveyOption, n: int, suggested: bool = False, category: str = "beverage") -> dict:
     """조사 옵션 N개 묶음 = 판매 옵션 1개. 원가 N배 · 용량 N배 + 박스 1개로 운임을 다시 계산한다.
     market_option2 = 마켓에 올릴 용량·입수 ("330ml×48캔"), pack_note = "24캔×2" 같은 설명."""
     volume1 = parse_volume_ml(o.option1, o.option2)
@@ -129,14 +148,14 @@ def bundle_option_dict(o: PriceSurveyOption, n: int, suggested: bool = False) ->
     base.update(market_option1=m1, market_option2=m2, total_count=count,
                 pack_note=f"{unit}×{n}" if n > 1 else None)   # "24캔×2"
     base["over_duty_free"] = price / CNY_PER_USD > DUTY_FREE_USD
-    if volume1 is None:
-        return {**base, "volume_ml": None, "weight_g": None, "billable_kg": None, "shipping_cny": None,
-                "over_limit": False}
-    volume = volume1 * n
-    weight = volume * G_PER_ML + BOX_WEIGHT_G
+    actual, dim, weight = _weights(volume1, n, category)
+    if weight is None:
+        return {**base, "volume_ml": None, "weight_g": None, "dim_weight_g": None, "billable_kg": None,
+                "shipping_cny": None, "over_limit": False}
     billable = billable_kg(weight)
     return {
-        **base, "volume_ml": volume, "weight_g": weight, "billable_kg": _kg(billable),
+        **base, "volume_ml": volume1 * n if volume1 is not None else None, "weight_g": actual,
+        "dim_weight_g": dim, "billable_kg": _kg(billable),
         "shipping_cny": money_cny(shipping_cny_for(billable)), "over_limit": billable > SHIPPING_MAX_KG,
     }
 
@@ -209,7 +228,7 @@ class ShippingService:
             items.append({
                 "product": product_dict(p),
                 "survey": {"id": s.id, "code": s.code, "survey_date": s.survey_date.isoformat()} if s else None,
-                "options": [option_dict(o) for o in options_by_survey.get(s.id, [])] if s else [],
+                "options": [option_dict(o, p.category) for o in options_by_survey.get(s.id, [])] if s else [],
             })
         return {
             "fx": await ExchangeRateService.current(),
