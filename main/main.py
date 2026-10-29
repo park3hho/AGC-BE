@@ -17,6 +17,7 @@ from routers import (
     api_credential,
     shipping_address,
     order,
+    order_document,
     taobao_purchase,
     jiyun,
     auth,
@@ -78,6 +79,7 @@ app.include_router(company_account.router)
 app.include_router(api_credential.router)
 app.include_router(company_info.router)
 app.include_router(shipping_address.router)
+app.include_router(order_document.router)   # /orders/{id}/documents — /orders/{id} 보다 먼저
 app.include_router(order.router)
 app.include_router(taobao_purchase.router)
 app.include_router(jiyun.router)

@@ -23,6 +23,7 @@ TORTOISE_ORM = {
                 "models.order.order",   # 마켓 주문 · 추적 기록(OrderEvent) · 수집 기록(OrderSyncRun)
                 "models.order.purchase",   # 타오바오 구매 · 중국 내 배송 (마켓 주문과 다대다)
                 "models.order.jiyun",   # 집운 기록 — 배송 요청 · 배송비 결제 · 출고 · 국제 운송장 · 국내 송장
+                "models.order.document",   # 주문 증빙 파일 — 타오바오 영수증 · 집운 결제 내역 · 마켓 정산 내역
                 "aerich.models",
             ],
             "default_connection": "default",
