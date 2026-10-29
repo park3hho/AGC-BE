@@ -38,6 +38,34 @@ G_PER_ML = 1                           # 음료 1ml = 1g 으로 본다
 VOLUMETRIC_DIVISOR = 6000
 TEA_BOX_CM = (30, 20, 15)
 
+# ── 타오바오 공식 집운 안내 (화면 표시용, 계산은 위 식품 요율만 쓴다) ───────────────────────────
+# 출처: '韩国集运海运-经济型运费报价' 官方物流 · 海运宅配, 확인일 2026-10-29 (Manager 2 조사, 사용자 요청)
+SHIPPING_SOURCE_URL = "https://world.taobao.com/wow/z/oversea/rule-guide/hFXyydtteWSdFtTPjENn"
+SHIPPING_SOURCE_CHECKED = "2026-10-29"
+VOLUMETRIC_SOURCE_URL = "https://world.taobao.com/wow/oversea/act/wuliuyunfei"
+SHIPPING_ETA = "합포장 후 6~7일 도착 (결제 화면에는 8~12일로 나오기도 함)"
+SHIPPING_RATES = [   # 금액은 위안 문자열
+    {"name": "일반 소형", "cn": "普货小件", "range": "0~30kg", "price": "첫 1kg ¥21.5 · 0.5kg마다 ¥2", "applied": False},
+    {"name": "식품 소형", "cn": "食品敏货", "range": "0~30kg", "price": "첫 1kg ¥33 · 0.5kg마다 ¥2", "applied": True},
+    {"name": "일반 대형", "cn": "普货大件", "range": "30~200kg",
+     "price": "30~100kg ¥5.0/kg · 100~150kg ¥19/kg · 150~200kg ¥20/kg (+대형 작업비 별도)", "applied": False},
+]
+SHIPPING_BILLABLE_RULE = "실제 무게와 부피 무게 중 큰 값"
+SHIPPING_ROUNDING = [
+    "2.0~30kg: 첫 무게 1kg 미만도 1kg, 추가 무게는 0.5kg 단위 올림",
+    "30kg 넘으면 1kg 단위 올림",
+]
+SHIPPING_SIZE_LIMITS = [
+    "소형: 무게 ≤30kg, 가장 긴 변 ≤100cm, 세 변 합 ≤180cm",
+    "대형: 실제 무게 30~200kg, 또는 100cm < 가장 긴 변 ≤200cm, 또는 180cm < 세 변 합 ≤300cm",
+    "넘으면 집운 창고가 받지 않을 수 있음 — 주문 전에 판매자와 무게·크기 확인",
+]
+SHIPPING_TAX_NOTE = "운임에 한국 관세·소비세·지방세는 포함되지 않음"
+SHIPPING_NOTES = [
+    "받는 사람 정보(이름·전화·주소)와 개인통관번호를 정확히 입력",
+    "창고 입고 후 직접 합포장하고 운임 결제",
+]
+
 # ── 묶음 판매 (2026-10-26 사용자 결정) ─────────────────────────────────────────
 # 첫 1kg 요금이 고정이라 한 번에 많이 보낼수록 한 개당 운임이 싸다.
 # 제품에서 가장 무거운 옵션도 10kg 미만이면, 그 옵션을 N개 묶어 10kg 이상이 되는 가장 작은 N 을 제안한다.

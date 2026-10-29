@@ -20,8 +20,18 @@ from core.shipping_config import (
     SHIPPING_SERVICE_LABEL,
     SHIPPING_STEP_CNY,
     SHIPPING_STEP_KG,
+    SHIPPING_BILLABLE_RULE,
+    SHIPPING_ETA,
+    SHIPPING_NOTES,
+    SHIPPING_RATES,
+    SHIPPING_ROUNDING,
+    SHIPPING_SIZE_LIMITS,
+    SHIPPING_SOURCE_CHECKED,
+    SHIPPING_SOURCE_URL,
+    SHIPPING_TAX_NOTE,
     TEA_BOX_CM,
     VOLUMETRIC_DIVISOR,
+    VOLUMETRIC_SOURCE_URL,
 )
 from models.product.price_survey import PriceSurveyOption
 from services.pricing.exchange_rate_service import ExchangeRateService
@@ -93,6 +103,24 @@ def shipping_rule() -> dict:
         "step_cny": money_cny(SHIPPING_STEP_CNY),
         "max_kg": _kg(SHIPPING_MAX_KG),
         "box_weight_g": BOX_WEIGHT_G,
+        # 타오바오 공식 집운 안내 (화면 표시용 — 계산은 위 식품 요율)
+        "eta": SHIPPING_ETA,
+        "rates": SHIPPING_RATES,                 # [{name, cn, range, price, applied}] applied = AGC 계산에 쓰는 요율
+        "billable_rule": SHIPPING_BILLABLE_RULE,
+        "rounding": SHIPPING_ROUNDING,
+        "size_limits": SHIPPING_SIZE_LIMITS,
+        "tax_note": SHIPPING_TAX_NOTE,
+        "notes": SHIPPING_NOTES,
+        "volumetric": {                          # 부피 무게 — 차(tea) 제품만 반영
+            "divisor": VOLUMETRIC_DIVISOR,
+            "applies_to": "tea",
+            "box_cm": list(TEA_BOX_CM),
+            "box_weight_g": dim_weight_g(1),
+            "source_url": VOLUMETRIC_SOURCE_URL,
+            "source_note": "나누는 값은 공식 집운 안내에 없음 — 타오바오 국제물류 안내 예시(6000)",
+        },
+        "source_url": SHIPPING_SOURCE_URL,
+        "source_checked": SHIPPING_SOURCE_CHECKED,
     }
 
 
