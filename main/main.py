@@ -15,6 +15,7 @@ from services.pricing.exchange_rate_service import fx_auto_loop
 from services.order.order_service import order_poll_loop
 from routers import (
     api_credential,
+    company_reminder,
     shipping_address,
     order,
     order_document,
@@ -78,6 +79,7 @@ app.include_router(users.router)
 app.include_router(company_account.router)
 app.include_router(api_credential.router)
 app.include_router(company_info.router)
+app.include_router(company_reminder.router)   # 홈 할 일 — HQ 만료 날짜 (2026-10-30)
 app.include_router(shipping_address.router)
 app.include_router(order_document.router)   # /orders/{id}/documents — /orders/{id} 보다 먼저
 app.include_router(order.router)

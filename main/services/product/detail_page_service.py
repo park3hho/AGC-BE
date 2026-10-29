@@ -24,7 +24,7 @@ from models.product.price_survey import PriceSurveyOption
 from models.product.pricing import ProductPricing
 from models.product.product import Product
 from schemas.detail_page import DetailCommonSave, DetailContent, DetailPageApprove, DetailPageSave
-from services.company_account.company_info_service import linked_value
+from services.hq_client import linked_value  # 등록번호 정본 = HQ 기본 정보 (link food_agency_reg_no, 2026-10-30)
 from services.product import detail_export_service as exports
 from services.product.price_survey_service import alive_surveys
 from services.product.product_service import alive_products

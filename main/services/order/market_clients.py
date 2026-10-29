@@ -1,5 +1,5 @@
 """마켓 주문 조회 클라이언트 (읽기 전용) — 네이버 커머스API · 쿠팡 OpenAPI.
-키는 API 키 저장소(ApiCredential)에서 꺼낸다. 키·토큰·응답 본문은 로그에 남기지 않는다."""
+키는 HQ(회사 정보 정본)의 API 키에서 꺼낸다 (services/hq_client.py — HQ 장애 때는 마지막 값으로 계속). 키·토큰·응답 본문은 로그에 남기지 않는다."""
 
 import asyncio
 import base64
@@ -14,7 +14,7 @@ from datetime import datetime, timedelta, timezone
 
 import bcrypt
 
-from services.company_account.api_credential_service import credential_values
+from services.hq_client import COUPANG_OPENAPI, NAVER_COMMERCE, credential_values  # 키 정본 = HQ (2026-10-30)
 
 KST = timezone(timedelta(hours=9))
 TIMEOUT = 30
@@ -46,7 +46,7 @@ async def http(method, url, headers, body=None) -> dict:
 
 # ---------------------------------------------------------------- 네이버
 NAVER_BASE = "https://api.commerce.naver.com/external"
-NAVER_SERVICE = "네이버 커머스API"
+NAVER_SERVICE = NAVER_COMMERCE  # HQ API 키 code
 _naver_token: dict = {"value": None, "exp": 0.0}
 
 
@@ -101,7 +101,7 @@ async def naver_product_orders(ids: list[str]) -> list[dict]:
 
 # ---------------------------------------------------------------- 쿠팡
 COUPANG_BASE = "https://api-gateway.coupang.com"
-COUPANG_SERVICE = "쿠팡 OpenAPI"
+COUPANG_SERVICE = COUPANG_OPENAPI  # HQ API 키 code
 COUPANG_429_WAITS = (3, 8, None)                     # 429 면 3초 → 8초 기다렸다 다시, 세 번째도 429 면 실패
 COUPANG_RECEIVE_STATUSES = ("ACCEPT", "INSTRUCT")      # 결제완료 · 상품준비중 — 접수 단계
 

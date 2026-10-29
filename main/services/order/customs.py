@@ -13,11 +13,11 @@ import xml.etree.ElementTree as ET
 from datetime import datetime, timedelta, timezone
 
 from models.order.jiyun import JiyunShipment
-from services.company_account.api_credential_service import credential_values
+from services.hq_client import UNIPASS, credential_values  # 키 정본 = HQ (2026-10-30)
 
 logger = logging.getLogger(__name__)
 URL = "https://unipass.customs.go.kr:38010/ext/rest/cargCsclPrgsInfoQry/retrieveCargCsclPrgsInfo"
-SERVICE = "UNI-PASS OpenAPI"
+SERVICE = UNIPASS  # HQ API 키 code
 KEY_LABEL = "API001 인증키 (화물통관진행)"
 KST = timezone(timedelta(hours=9))
 CLEARED = ("수입신고수리", "반출신고", "반출")

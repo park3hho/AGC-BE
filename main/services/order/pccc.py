@@ -13,10 +13,10 @@ import xml.etree.ElementTree as ET
 from dataclasses import dataclass, field
 from datetime import date
 
-from services.company_account.api_credential_service import credential_values
+from services.hq_client import UNIPASS, credential_values  # 키 정본 = HQ (2026-10-30)
 
 UNIPASS_URL = "https://unipass.customs.go.kr:38010/ext/rest/persEcmQry/retrievePersEcm"
-UNIPASS_SERVICE = "UNI-PASS OpenAPI"
+UNIPASS_SERVICE = UNIPASS  # HQ API 키 code
 UNIPASS_KEY_LABEL = "API028 인증키 (통관부호 검증)"
 
 
