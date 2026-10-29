@@ -1,5 +1,6 @@
 """상세페이지(디자인) — 템플릿 채우기 · 저장 · 검수(휴먼 체크) · 공통 안내. BE DESIGN.md §6.4"""
 
+import logging
 import re
 from datetime import datetime, timezone
 from typing import Optional
@@ -9,6 +10,8 @@ from tortoise.exceptions import IntegrityError
 from tortoise.transactions import in_transaction
 
 from core.company_info_config import LINK_FOOD_AGENCY_REG_NO
+
+logger = logging.getLogger(__name__)
 from core.detail_page_config import (
     DEFAULT_COMMON,
     MARKER_RE,
@@ -115,7 +118,7 @@ def _common_dict(c: DetailPageCommon, reg_no_linked: bool = False) -> dict:
     return {
         **payload,
         "reg_no_ready": reg_no_ready(c.reg_no),
-        "reg_no_linked": reg_no_linked,     # true = 회사 정보 › 기본 정보에서 가져온 값 (S6 에서는 못 고침)
+        "reg_no_linked": reg_no_linked,     # true = HQ 회사 정보 › 기본 정보에서 가져온 값 (S6 에서는 못 고침)
         "marker_count": count_markers({k: v for k, v in payload.items() if k != "reg_no"}),
         "updated_at": c.updated_at.isoformat(),
     }
@@ -136,6 +139,18 @@ async def _apply_common(data: dict, user_id: int, reason: str) -> int:
             await _log(dp.id, ReviewAction.RESET, user_id, reason, conn=conn)
         return len(approved)
 
+
+async def _common_synced() -> tuple[DetailPageCommon, bool]:
+    """공통 안내 + 등록번호가 HQ 에 연결돼 있는지. HQ 값과 다르면 여기서 맞춘다 (2026-10-30).
+    예전에는 AGC 회사 정보 화면에서 고칠 때 sync_linked_reg_no 를 불렀지만, 이제 등록번호는 HQ 에서 고치므로
+    읽을 때 다르면 맞추고 승인된 상세페이지를 검수 대기로 되돌린다 (HQ 값은 hq_client 가 10분 보관)."""
+    linked = await linked_value(LINK_FOOD_AGENCY_REG_NO)
+    c = await _get_common()
+    if linked is not None and c.reg_no != linked:
+        n = await _apply_common({**_common_payload(c), "reg_no": linked}, None, "등록번호(HQ 회사 정보)가 바뀌어 다시 검수해요")
+        logger.info("S6 등록번호를 HQ 값으로 맞춤 — 검수 대기로 되돌린 상세페이지 %d개", n)
+        c = await DetailPageCommon.get(id=COMMON_ID)
+    return c, linked is not None
 
 async def _get_common() -> DetailPageCommon:
     c = await DetailPageCommon.get_or_none(id=COMMON_ID)
@@ -352,14 +367,14 @@ class DetailPageService:
         p = await _get_product(product_id)
         options = await _latest_options(p.id)
         dp = await DetailPage.get_or_none(product_id=p.id)
-        common = await _get_common()
+        common, linked = await _common_synced()
         template = build_template(p, options)
         return {
             "product": product_dict(p),
             "page": await _page_dict(dp) if dp else None,
             "template": template,          # 페이지가 없을 때 처음 채울 값 (저장하지 않은 상태)
             "photos": _photos(p, options),
-            "common": _common_dict(common, reg_no_linked=await linked_value(LINK_FOOD_AGENCY_REG_NO) is not None),
+            "common": _common_dict(common, reg_no_linked=linked),
         }
 
     @staticmethod
@@ -449,8 +464,8 @@ class DetailPageService:
 
     @staticmethod
     async def get_common() -> dict:
-        linked = await linked_value(LINK_FOOD_AGENCY_REG_NO)
-        return _common_dict(await _get_common(), reg_no_linked=linked is not None)
+        c, linked = await _common_synced()
+        return _common_dict(c, reg_no_linked=linked)
 
     @staticmethod
     async def save_common(body: DetailCommonSave, user_id: int) -> dict:
