@@ -56,7 +56,7 @@ async def _list_extras(product_ids: list[int]) -> dict[int, dict]:
         extras[r["product_id"]]["priced_platforms"].append(getattr(platform, "value", platform))
 
     # 채택한 묶음 중 판매가가 빈 판매처 칸 수 (판매처 2곳 × 묶음) — 가격 책정 목록에서 "묶음 판매가 필요" 로 보인다
-    from core.pricing_config import Platform
+    from core.pricing_config import MARKET_PLATFORMS
     from models.product.pricing import OptionPrice, ProductBundle   # 순환 import 방지
     for pid in product_ids:
         extras[pid]["bundle_unpriced"] = 0
@@ -71,7 +71,7 @@ async def _list_extras(product_ids: list[int]) -> dict[int, dict]:
             ).values("option_id", "bundle_qty", "pricing__platform")
         }
         for a in adopted:
-            for pf in Platform:
+            for pf in MARKET_PLATFORMS:      # 자사몰 묶음가는 세지 않는다
                 if (a["option_id"], a["bundle_qty"], pf.value) not in priced:
                     extras[a["product_id"]]["bundle_unpriced"] += 1
     return extras

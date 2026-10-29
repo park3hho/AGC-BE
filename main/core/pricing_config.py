@@ -7,6 +7,11 @@ from enum import Enum
 class Platform(str, Enum):
     COUPANG = "coupang"
     NAVER = "naver"
+    SHOP = "shop"          # 자사몰 eidofood.com (2026-10-29) — 마켓이 아니라 가격만 정한다. SHOP-BE 가 읽는다
+
+
+# 마켓 = 상품 등록 · 주문 수집 · "가격 책정 완료" 기준이 되는 판매처 (자사몰 제외)
+MARKET_PLATFORMS = (Platform.COUPANG, Platform.NAVER)
 
 
 # 배송비 기본값 (원/개) — 더 이상 계산에 쓰지 않는다 (2026-10-20).
@@ -57,4 +62,6 @@ DEFAULT_FX_MARKUP_PCT = 0
 DEFAULT_FEE_RATES = {
     Platform.COUPANG: {"platform_fee_rate": "11.66", "payment_fee_rate": "0"},
     Platform.NAVER: {"platform_fee_rate": "3", "payment_fee_rate": "3.63"},
+    # 자사몰: 판매수수료 없음. 결제 = 네이버페이 결제형 · 카카오페이 온라인 영세 등급 약 0.9~0.96% → 1%로 어림 (2026-10-26 조회)
+    Platform.SHOP: {"platform_fee_rate": "0", "payment_fee_rate": "1"},
 }

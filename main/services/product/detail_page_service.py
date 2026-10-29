@@ -18,7 +18,7 @@ from core.detail_page_config import (
     ExportPlatform,
     ReviewAction,
 )
-from core.pricing_config import Platform
+from core.pricing_config import MARKET_PLATFORMS, Platform
 from models.product.detail_page import DetailPage, DetailPageCommon, DetailPageReview
 from models.product.price_survey import PriceSurveyOption
 from models.product.pricing import ProductPricing
@@ -295,7 +295,7 @@ async def _page_dict(dp: DetailPage) -> dict:
 
 async def _priced_product_ids() -> list[int]:
     """모든 판매처 판매가를 저장한 제품 (FE utils/pricing.pricingStatusOf 의 'done' 과 같은 기준)."""
-    need = {pf.value for pf in Platform}
+    need = {pf.value for pf in MARKET_PLATFORMS}     # 자사몰가는 없어도 완료
     have: dict[int, set] = {}
     for r in await ProductPricing.filter(product__deleted_at=None).values("product_id", "platform"):
         pf = r["platform"]
