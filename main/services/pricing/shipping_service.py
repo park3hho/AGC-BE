@@ -13,6 +13,7 @@ from core.shipping_config import (
     CNY_PER_USD,
     DUTY_FREE_USD,
     G_PER_ML,
+    MIN_BOX_CM,
     SHIPPING_CATEGORY_LABEL,
     SHIPPING_FIRST_CNY,
     SHIPPING_FIRST_KG,
@@ -65,9 +66,19 @@ def dim_weight_g(n: int = 1) -> int:
     return int(Decimal(a * b * c * n) * 1000 / VOLUMETRIC_DIVISOR)
 
 
+def min_box_dim_g(n: int = 1) -> int:
+    """용량을 못 읽은 상품의 최소 상자(세 변 합 50cm) N개 부피 무게(g)."""
+    a, b, c = MIN_BOX_CM
+    return int(Decimal(a * b * c * n) * 1000 / VOLUMETRIC_DIVISOR)
+
+
 def _weights(volume: Optional[int], n: int, category: str) -> tuple[Optional[int], Optional[int], Optional[int]]:
-    """(실제 무게, 부피 무게, 계산에 쓸 무게) g. 음료는 실제 무게만. 차는 둘 중 큰 값 — 용량을 못 읽어도 부피 무게로 잡는다."""
+    """(실제 무게, 부피 무게, 계산에 쓸 무게) g. 음료는 실제 무게만. 차는 둘 중 큰 값 — 용량을 못 읽어도 부피 무게로 잡는다.
+    음료도 용량을 못 읽으면 최소 상자(세 변 합 50cm, core/shipping_config.MIN_BOX_CM) 부피 무게로 잡는다 (2026-10-30)."""
     actual = volume * n * G_PER_ML + BOX_WEIGHT_G if volume is not None else None
+    if category != "tea" and actual is None:
+        dim = min_box_dim_g(n)
+        return None, dim, dim
     if category != "tea":
         return actual, None, actual
     dim = dim_weight_g(n)
@@ -83,6 +94,7 @@ def option_shipping(option1: str, option2: Optional[str], category: str = "bever
                 "shipping_cny": None, "over_limit": False}
     billable = billable_kg(weight)
     return {
+        "box_assumed": volume is None and category != "tea",   # 용량을 못 읽어 최소 상자(세 변 합 50cm)로 계산함
         "volume_ml": volume,
         "weight_g": actual,
         "dim_weight_g": dim,          # 부피 무게 (차만) — 계산 무게는 실제·부피 중 큰 값
@@ -182,7 +194,8 @@ def bundle_option_dict(o: PriceSurveyOption, n: int, suggested: bool = False, ca
                 "shipping_cny": None, "over_limit": False}
     billable = billable_kg(weight)
     return {
-        **base, "volume_ml": volume1 * n if volume1 is not None else None, "weight_g": actual,
+        **base, "box_assumed": volume1 is None and category != "tea",
+        "volume_ml": volume1 * n if volume1 is not None else None, "weight_g": actual,
         "dim_weight_g": dim, "billable_kg": _kg(billable),
         "shipping_cny": money_cny(shipping_cny_for(billable)), "over_limit": billable > SHIPPING_MAX_KG,
     }
