@@ -22,7 +22,7 @@ def alive_products():
 async def _list_extras(product_ids: list[int]) -> dict[int, dict]:
     """목록 행에 붙이는 값 — 최근 가격 조사의 옵션 수·최저가, 가격을 저장한 판매처.
     페이지에 나온 제품만 재므로 쿼리 3번으로 끝낸다 (제품마다 따로 읽지 않는다)."""
-    extras = {pid: {"latest_survey": None, "priced_platforms": []} for pid in product_ids}
+    extras = {pid: {"latest_survey": None, "priced_platforms": [], "shipping_unknown": 0} for pid in product_ids}
     if not product_ids:
         return extras
 
@@ -36,10 +36,17 @@ async def _list_extras(product_ids: list[int]) -> dict[int, dict]:
         latest.setdefault(s["product_id"], s)
 
     prices: dict[int, list] = {}
+    unknown: dict[int, int] = {}      # 최근 조사에서 용량을 못 읽어 배송비를 모르는 옵션 수 (2026-10-30)
+    from services.pricing.shipping_service import option_shipping   # 순환 import 방지
+    cats = {r["id"]: r["category"] for r in await Product.filter(id__in=product_ids).values("id", "category")}
+    sid_pid = {s["id"]: pid for pid, s in latest.items()}
     for o in await PriceSurveyOption.filter(survey_id__in=[s["id"] for s in latest.values()]).values(
-        "survey_id", "price_cny"
+        "survey_id", "price_cny", "option1", "option2"
     ):
         prices.setdefault(o["survey_id"], []).append(o["price_cny"])
+        cat = cats.get(sid_pid.get(o["survey_id"])) or "beverage"
+        if option_shipping(o["option1"], o["option2"], cat)["shipping_cny"] is None:
+            unknown[o["survey_id"]] = unknown.get(o["survey_id"], 0) + 1
 
     for pid, s in latest.items():
         ps = prices.get(s["id"], [])
@@ -50,6 +57,7 @@ async def _list_extras(product_ids: list[int]) -> dict[int, dict]:
             "option_count": len(ps),
             "min_price_cny": money_cny(min(ps)) if ps else None,
         }
+        extras[pid]["shipping_unknown"] = unknown.get(s["id"], 0)   # 0 보다 크면 가격 책정 '배송비 모름' (완료로 안 침)
 
     for r in await ProductPricing.filter(product_id__in=product_ids).values("product_id", "platform"):
         platform = r["platform"]
