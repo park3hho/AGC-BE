@@ -122,6 +122,33 @@ class PriceSurveyService:
         return await PriceSurveyService.get(s.id)
 
     @staticmethod
+    async def delete_option(survey_id: int, option_id: int) -> dict:
+        """옵션 1개만 삭제 (중복 옵션 정리용). 그 옵션의 판매가(OptionPrice)는 함께 지워지고,
+        대표 옵션 지정(base_option)은 비워진다. 다른 옵션은 손대지 않는다.
+        살아 있는 마켓 등록(items[].option_id)이 이 옵션을 쓰면 409 — 주문 매칭이 깨지지 않게 먼저 내린다."""
+        from models.product.listing import MarketListing  # 순환 import 피함
+
+        s = await _get_alive(survey_id)
+        opt = await PriceSurveyOption.get_or_none(id=option_id, survey_id=s.id)
+        if not opt:
+            raise HTTPException(status_code=404, detail="옵션을 찾을 수 없습니다.")
+        if await PriceSurveyOption.filter(survey_id=s.id).count() <= 1:
+            raise HTTPException(status_code=409, detail="마지막 옵션은 지울 수 없습니다.")
+        listings = await MarketListing.filter(product_id=s.product_id, deleted_at=None)
+        used = [
+            f"{l.platform} {l.market_product_id}"
+            for l in listings
+            if any(str(it.get("option_id")) == str(opt.id) for it in (l.items or []))
+        ]
+        if used:
+            raise HTTPException(
+                status_code=409,
+                detail=f"마켓 등록에 쓰이는 옵션입니다. 먼저 내려 주세요: {', '.join(used)}",
+            )
+        await opt.delete()
+        return await PriceSurveyService.get(s.id)
+
+    @staticmethod
     async def delete(survey_id: int) -> None:
         s = await _get_alive(survey_id)
         s.deleted_at = datetime.now(timezone.utc)

@@ -88,6 +88,18 @@ async def patch_price_survey_option(
         raise HTTPException(status_code=500, detail="처리 중 오류가 발생했습니다.")
 
 
+@router.delete("/{survey_id}/options/{option_id}")
+async def delete_price_survey_option(survey_id: int, option_id: int, auth=Depends(require_feature(Feature.RESEARCH))):
+    """옵션 1개만 삭제 — 다른 옵션의 id·판매가는 그대로. 마켓 등록에 쓰이는 옵션이면 409 (먼저 마켓에서 내리고 등록 기록을 지운다)."""
+    try:
+        return success(price_survey=await PriceSurveyService.delete_option(survey_id, option_id))
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"가격 조사 옵션 삭제 실패: {e}")
+        raise HTTPException(status_code=500, detail="처리 중 오류가 발생했습니다.")
+
+
 @router.delete("/{survey_id}")
 async def delete_price_survey(survey_id: int, auth=Depends(require_feature(Feature.RESEARCH))):
     try:
