@@ -17,7 +17,9 @@ from core.shipping_config import COURIERS
 from models.order.jiyun import JiyunShipment
 from models.order.order import MarketOrder
 from schemas.jiyun import JiyunCreate, JiyunUpdate
-from services.order.order_service import actor_of, log_event
+import re
+
+from services.order.order_service import actor_of, log_event, receiver_full
 
 logger = logging.getLogger(__name__)
 
@@ -90,6 +92,38 @@ async def _check_no_free(no: str, self_id: int | None, conn) -> None:
         raise HTTPException(status_code=409, detail=f"집운 번호 {no} 는 이미 {other.order.code or '다른 고객 주문'} 에 등록돼 있습니다.")
 
 
+def _base_no(no: str) -> str:
+    """같은 집운에 묶인 주문은 번호 뒤에 -2, -3 을 붙여 적는다 — 붙이기 전 원래 번호."""
+    return re.sub(r"-\d{1,2}$", "", (no or "").strip())
+
+
+def _same_receiver(a: MarketOrder, b: MarketOrder) -> bool:
+    ra, rb = receiver_full(a), receiver_full(b)
+    norm = lambda s: re.sub(r"\s+", "", s or "")
+    # 주소 글자는 마켓마다 표기가 달라(건물명·법정동 괄호) 같은 집이어도 다르게 나온다 → 이름 + 우편번호로 본다
+    return all(norm(ra[k]) == norm(rb[k]) for k in ("name", "zip"))
+
+
+async def _check_bundle_receiver(no: str, order: MarketOrder, self_id: int | None, conn) -> None:
+    """한 집운(합포장)에는 받는 사람이 같은 주문만 (2026-10-31).
+    고객이 다른 주문을 한 상자로 묶으면 집운이 받는 곳을 기본 주소 하나로 바꿔 버린다 →
+    고객별 통관이 안 되고, 취소·재결제하거나 한국에서 다시 보내야 했다 (10-30 LP00851255909575).
+    자세한 규칙: AGC-FE src/playbooks/jiyun-rules.md (설정 › 플레이북)"""
+    base = _base_no(no)
+    qs = alive().using_db(conn).filter(jiyun_no__startswith=base).exclude(order_id=order.id)
+    if self_id is not None:
+        qs = qs.exclude(id=self_id)
+    for other in await qs.prefetch_related("order"):
+        if _base_no(other.jiyun_no) != base:
+            continue
+        if not _same_receiver(order, other.order):
+            raise HTTPException(
+                status_code=409,
+                detail=(f"집운 {base} 에는 이미 받는 사람이 다른 주문 {other.order.code} 이 묶여 있습니다. "
+                        "받는 사람이 다른 주문은 집운을 따로 보내야 해요."),
+            )
+
+
 def _auto_times(data: dict, j: JiyunShipment | None) -> None:
     if data.get("status", j.status if j else "requested") == "dispatched" and not data.get("dispatched_at") and not (j and j.dispatched_at):
         data["dispatched_at"] = datetime.now(timezone.utc)
@@ -135,6 +169,7 @@ class JiyunService:
             if order.stage == "cancelled":
                 raise HTTPException(status_code=409, detail="취소된 주문에는 집운 기록을 등록할 수 없습니다.")
             await _check_no_free(data["jiyun_no"], None, conn)
+            await _check_bundle_receiver(data["jiyun_no"], order, None, conn)
             j = await JiyunShipment.create(order_id=order.id, **data, created_by_id=auth.get("user_id"), using_db=conn)
         snap = _snapshot(j)
         await log_event(
@@ -160,6 +195,8 @@ class JiyunService:
                 raise HTTPException(status_code=404, detail="집운 기록을 찾지 못했습니다.")
             if "jiyun_no" in data:
                 await _check_no_free(data["jiyun_no"], j.id, conn)
+                await _check_bundle_receiver(
+                    data["jiyun_no"], await MarketOrder.get(id=j.order_id).using_db(conn), j.id, conn)
             _auto_times(data, j)
             before = _snapshot(j)
             await j.update_from_dict(data).save(using_db=conn)
