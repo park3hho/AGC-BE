@@ -83,6 +83,10 @@ server {
     location = /fin {
         return 301 /fin/;
     }
+    # FIN /svc (부서 서비스 키 API) 는 같은 PC · Docker 안에서만 — 밖에서는 404 (FIN 앱도 X-Forwarded-For 로 한 번 더 막음, 2026-10-31)
+    location ^~ /fin/svc/ {
+        return 404;
+    }
     location /fin/ {
         resolver 127.0.0.11 valid=30s ipv6=off;
         set $fin_upstream http://fin_app:8000;
