@@ -4,6 +4,7 @@
 상태가 '판매처 발송'·'창고 입고'로 바뀌었는데 시각이 비어 있으면 지금 시각을 넣는다."""
 
 import logging
+from services.finance import fin_expense
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 
@@ -169,6 +170,7 @@ class TaobaoPurchaseService:
             {"purchase_id": p.id, "values": {k: v for k, v in snap.items() if v not in (None, [], "")}},
         )
         await restage(order, actor, "타오바오 구매 기록")   # 구매 기록이 생기면 접수 → 처리
+        fin_expense.kick()   # FIN 지출 원장으로 (2026-10-30)
         return await purchase_dict(p)
 
     @staticmethod
@@ -198,6 +200,7 @@ class TaobaoPurchaseService:
                 {"purchase_id": p.id, "changes": changes},
             )
         await restage(await MarketOrder.get(id=p.order_id), actor, "타오바오 구매 상태 변경")   # 취소·환불로 바뀌면 다시 접수
+        fin_expense.kick()
         return await purchase_dict(p)
 
     @staticmethod
@@ -215,3 +218,4 @@ class TaobaoPurchaseService:
             {"purchase_id": p.id, "values": {k: v for k, v in snap.items() if v not in (None, [], "")}},
         )
         await restage(order, actor, "타오바오 구매 기록 삭제")   # 남은 구매 기록이 없으면 처리 → 접수
+        fin_expense.kick()

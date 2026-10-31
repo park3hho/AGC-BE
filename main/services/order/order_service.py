@@ -607,6 +607,11 @@ async def order_poll_loop() -> None:
             await refresh_customs()
         except Exception:
             logger.exception("통관 진행 조회 실패")
+        try:   # FIN 지출 원장 — 바뀐 줄만 · 지난번 실패분 다시 (2026-10-30)
+            from services.finance.fin_expense import sync_all
+            await sync_all()
+        except Exception:
+            logger.exception("FIN 지출 보내기 실패")
 
 
 # ------------------------------------------------------------ 조회

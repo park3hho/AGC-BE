@@ -5,6 +5,7 @@ data 에 단계(국제 발송) · 관련 번호(집운 번호 · H B/L · 국내
 상태를 '출고'로 바꿨는데 출고 시각이 비어 있으면 지금 시각을 넣는다."""
 
 import logging
+from services.finance import fin_expense
 from datetime import datetime, timezone
 from decimal import Decimal
 
@@ -142,6 +143,7 @@ class JiyunService:
              "occurred_at": _occurred({}, j), "refs": _refs(j),
              "values": {k: v for k, v in snap.items() if v not in (None, [], "")}},
         )
+        fin_expense.kick()   # FIN 지출 원장으로 (2026-10-30)
         return await jiyun_dict(j)
 
     @staticmethod
@@ -171,6 +173,7 @@ class JiyunService:
                  "occurred_at": _occurred(data, j) if "status" in changes else None,
                  "refs": _refs(j), "changes": changes},
             )
+        fin_expense.kick()   # FIN 지출 원장으로 (2026-10-30)
         return await jiyun_dict(j)
 
     @staticmethod
@@ -181,6 +184,7 @@ class JiyunService:
             raise HTTPException(status_code=404, detail="집운 기록을 찾지 못했습니다.")
         j.deleted_at = datetime.now(timezone.utc)
         await j.save(update_fields=["deleted_at", "updated_at"])
+        fin_expense.kick()
         order = await MarketOrder.get(id=j.order_id)
         await log_event(order, actor, "jiyun_deleted", f"집운 {j.jiyun_no} 기록 삭제",
                         {"jiyun_id": j.id, "values": _snapshot(j)})
