@@ -300,15 +300,17 @@ async def progress_of(order_ids: list[int]) -> dict[int, dict]:
         step = {"ordered": 0, "shipped": 1, "arrived": 2}.get(p.cn_status, 0)
         out[p.order_id] = max(out.get(p.order_id, 0), step)
     jiyun: set[int] = set()      # 집운 기록 있음 — 모바일 '다음 할 일' 판정용 (2026-10-30)
-    tracking: set[int] = set()   # 국내 송장 있음
+    tracking: dict[int, tuple] = {}   # 국내 송장 있음 — (택배사 코드, 송장 번호) · 목록에서 '배송 중 — CJ대한통운 …' (2026-11-02)
     for j in await JiyunShipment.filter(order_id__in=order_ids, deleted_at=None).exclude(status="cancelled"):
         step = 3 if j.status == "dispatched" else 2
         out[j.order_id] = max(out.get(j.order_id, 0), step)
         jiyun.add(j.order_id)
         if j.kr_tracking_no:
-            tracking.add(j.order_id)
+            tracking[j.order_id] = (j.kr_courier, j.kr_tracking_no)
     return {oid: {"step": s, "label": PROGRESS_STEPS[s], "total": len(PROGRESS_STEPS),
-                  "jiyun": oid in jiyun, "tracking": oid in tracking} for oid, s in out.items()}
+                  "jiyun": oid in jiyun, "tracking": oid in tracking,
+                  "kr_courier": tracking.get(oid, (None, None))[0], "kr_tracking_no": tracking.get(oid, (None, None))[1]}
+            for oid, s in out.items()}
 
 
 async def upsert_line(line: dict, actor: dict, run) -> str:
