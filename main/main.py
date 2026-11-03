@@ -20,6 +20,7 @@ from routers import (
     order_document,
     taobao_purchase,
     jiyun,
+    domestic,
     auth,
     detail_page,
     exchange_rate,
@@ -79,6 +80,7 @@ app.include_router(order_document.router)   # /orders/{id}/documents — /orders
 app.include_router(order.router)
 app.include_router(taobao_purchase.router)
 app.include_router(jiyun.router)
+app.include_router(domestic.router)
 app.include_router(listing.router)
 app.include_router(product.router)
 app.include_router(price_survey.router)

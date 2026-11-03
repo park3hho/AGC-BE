@@ -609,6 +609,11 @@ async def order_poll_loop() -> None:
             await refresh_customs()
         except Exception:
             logger.exception("통관 진행 조회 실패")
+        try:   # 국내 배송 기록 — 마켓 발송처리 · 배송 조회 (tracker.delivery, 송장마다 30분에 한 번) (2026-11-03)
+            from services.order.domestic_service import refresh_domestic
+            await refresh_domestic()
+        except Exception:
+            logger.exception("국내 배송 조회 실패")
         try:   # FIN 지출 원장 — 바뀐 줄만 · 지난번 실패분 다시 (2026-10-30)
             from services.finance.fin_expense import sync_all
             await sync_all()

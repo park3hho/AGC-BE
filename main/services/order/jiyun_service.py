@@ -24,6 +24,11 @@ from services.order.order_service import actor_of, log_event, receiver_full
 logger = logging.getLogger(__name__)
 
 
+async def _sync_domestic(j: JiyunShipment, auth: dict) -> None:
+    from services.order.domestic_service import sync_jiyun   # 순환 import 피하기
+    await sync_jiyun(j, auth)
+
+
 def alive():
     return JiyunShipment.filter(deleted_at=None)
 
@@ -179,6 +184,7 @@ class JiyunService:
              "values": {k: v for k, v in snap.items() if v not in (None, [], "")}},
         )
         fin_expense.kick()   # FIN 지출 원장으로 (2026-10-30)
+        await _sync_domestic(j, auth)   # 국내 송장 → 국내 배송 기록 (2026-11-03)
         return await jiyun_dict(j)
 
     @staticmethod
@@ -211,6 +217,7 @@ class JiyunService:
                  "refs": _refs(j), "changes": changes},
             )
         fin_expense.kick()   # FIN 지출 원장으로 (2026-10-30)
+        await _sync_domestic(j, auth)   # 국내 송장 → 국내 배송 기록 (2026-11-03)
         return await jiyun_dict(j)
 
     @staticmethod
