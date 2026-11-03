@@ -61,8 +61,9 @@ def courier_from_market(code):
     """마켓 택배사 코드(또는 이름) → COURIERS 키. 모르면 None."""
     if not code or code in ("NONE", "None"):
         return None
+    flat = code.replace(" ", "")
     for k, v in COURIERS.items():
-        if code == k or code in v["codes"].values() or code == v["name"]:
+        if code == k or code in v["codes"].values() or flat == v["name"].replace(" ", ""):
             return k
     return None
 
@@ -72,13 +73,22 @@ def tracking_url(courier, no):
     return f"https://tracker.delivery/#/{t}/{no}" if t and no else None
 
 
-def market_delivery(o: MarketOrder) -> dict:
-    """마켓 원본에서 발송처리 정보 — {code, tracking_no, sent_at, delivered_at, wrong}. 없으면 빈 dict."""
-    if o.market not in ("naver", "coupang") or not o.raw_enc:
+def _raw_of(o: MarketOrder) -> dict:
+    if not o.raw_enc:
         return {}
     try:
-        raw = json.loads(_dec(o.raw_enc))
+        return json.loads(_dec(o.raw_enc))
     except Exception:
+        return {}
+
+
+def market_delivery(o: MarketOrder, raw: dict | None = None) -> dict:
+    """마켓 원본에서 발송처리 정보 — {code, tracking_no, sent_at, delivered_at, wrong}. 없으면 빈 dict.
+    raw 를 주면 그걸 쓴다 (쿠팡 발주서를 방금 다시 조회한 값)."""
+    if o.market not in ("naver", "coupang"):
+        return {}
+    raw = raw if raw is not None else _raw_of(o)
+    if not raw:
         return {}
     if o.market == "naver":
         d = raw.get("delivery") or {}
@@ -221,7 +231,19 @@ def _due(d: DomesticShipment, now: datetime, force: bool) -> bool:
 async def _refresh_one(d: DomesticShipment, now: datetime, force: bool, actor: dict) -> bool:
     o = await MarketOrder.get(id=d.order_id)
     before = _snapshot(d)
+    tracked = _due(d, now, force)
     m = market_delivery(o)
+    # 쿠팡 자동 수집은 결제완료·상품준비중 발주서만 다시 가져온다 → 배송중으로 넘어간 주문은 원본이 옛 상태로 남는다.
+    # 아직 발송처리가 안 보이면 조회 차례(30분)에 발주서 단건을 직접 다시 본다 (2026-11-03)
+    if o.market == "coupang" and tracked and not (m and m["tracking_no"] == d.tracking_no):
+        try:
+            from services.order.market_clients import coupang_ordersheet
+            box = _raw_of(o).get("shipmentBoxId")
+            sheet = await coupang_ordersheet(str(box)) if box else None
+            if sheet:
+                m = market_delivery(o, sheet) or m
+        except Exception as e:
+            logger.warning(f"쿠팡 발주서 다시 조회 실패: order_id={o.id} {type(e).__name__}")
     if m:
         d.market_courier, d.market_tracking_no = m["code"], m["tracking_no"]
         d.market_sent_at = m["sent_at"] or d.market_sent_at
@@ -230,7 +252,6 @@ async def _refresh_one(d: DomesticShipment, now: datetime, force: bool, actor: d
             d.delivered_at = d.delivered_at or m["delivered_at"]
         if not d.courier and m["tracking_no"] == d.tracking_no:
             d.courier = courier_from_market(m["code"])
-    tracked = _due(d, now, force)
     if tracked:
         await _track(d)
     d.status = _decide_status(d, o)

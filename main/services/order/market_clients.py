@@ -186,6 +186,28 @@ async def coupang_acknowledge(shipment_box_ids: list[str]) -> dict:
     return {"result": result, "raw": data}
 
 
+# ---------------------------------------------------------------- 발송처리 (쓰기) — 2026-11-03
+async def coupang_upload_invoice(sheet: dict, delivery_company_code: str, invoice_number: str) -> dict:
+    """쿠팡 송장업로드 처리 (상품준비중 INSTRUCT 에서만) — 발주서(sheet)의 옵션마다 같은 송장.
+    https://developers.coupang.com/ko/api/shipments/uploading-waybills
+    반환: {"ok": 모두 성공, "result": [(vendorItemId, 성공, 메시지)], "raw": 응답}"""
+    vendor = await coupang_vendor_id()
+    path = f"/v2/providers/openapi/apis/api/v4/vendors/{vendor}/orders/invoices"
+    dtos = [{"shipmentBoxId": int(sheet["shipmentBoxId"]), "orderId": int(sheet["orderId"]),
+             "vendorItemId": int(it["vendorItemId"]), "deliveryCompanyCode": delivery_company_code,
+             "invoiceNumber": invoice_number, "splitShipping": False, "preSplitShipped": False,
+             "estimatedShippingDate": ""} for it in sheet.get("orderItems") or []]
+    if not dtos:
+        raise MarketApiError("쿠팡 발주서에 옵션(orderItems)이 없습니다.")
+    data = await _coupang_call("POST", path, "", {"vendorId": vendor, "orderSheetInvoiceApplyDtos": dtos})
+    if str(data.get("code")) not in ("200", "SUCCESS"):
+        raise MarketApiError(f"쿠팡 {data.get('code')} {str(data.get('message'))[:200]}")
+    result = [(str(r.get("vendorItemId") or r.get("shipmentBoxId")), bool(r.get("succeed")),
+               str(r.get("resultMessage") or r.get("resultCode") or ""))
+              for r in (data.get("data") or {}).get("responseList") or []]
+    return {"ok": bool(result) and all(x[1] for x in result), "result": result, "raw": data}
+
+
 async def naver_confirm(product_order_ids: list[str]) -> dict:
     """네이버 발주 확인 (한 번에 30건까지). 반환: {productOrderId: (성공, 메시지)} + raw."""
     token = await _naver_auth()
