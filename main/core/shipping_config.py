@@ -87,12 +87,16 @@ CNY_PER_USD = Decimal("7.1")            # 근사값 — 경고용. 정확한 통
 #   https://developers-v1.coupangcorp.com/hc/ko/articles/360034156033
 #   https://apicenter.commerce.naver.com/docs/commerce-api/2.80.0/seller-dispatch-product-orders-pay-order-seller
 # 롯데택배는 두 마켓 모두 옛 이름 코드 HYUNDAI 를 쓴다.
+# tracker = 배송 조회 tracker.delivery 택배사 id (https://tracker.delivery/#/{tracker}/{송장})
+# 투데이(TODAY): 타오바오 공식 집운 한국 해운 물량의 국내 배송 — 인천 도착 뒤 99… 화물번호가 그대로 국내 송장이 된다
+#   (2026-11-03 확인, 예: OR-261029-0001 송장 994000416115). 네이버 · 쿠팡 deliveryCompanyCode 모두 TODAY
 COURIERS = {
-    "CJGLS": {"name": "CJ대한통운", "codes": {"쿠팡": "CJGLS", "네이버": "CJGLS"}},
-    "HANJIN": {"name": "한진택배", "codes": {"쿠팡": "HANJIN", "네이버": "HANJIN"}},
-    "LOTTE": {"name": "롯데택배", "codes": {"쿠팡": "HYUNDAI", "네이버": "HYUNDAI"}},
-    "EPOST": {"name": "우체국택배", "codes": {"쿠팡": "EPOST", "네이버": "EPOST"}},
-    "KGB": {"name": "로젠택배", "codes": {"쿠팡": "KGB", "네이버": "KGB"}},
+    "CJGLS": {"name": "CJ대한통운", "codes": {"쿠팡": "CJGLS", "네이버": "CJGLS"}, "tracker": "kr.cjlogistics"},
+    "HANJIN": {"name": "한진택배", "codes": {"쿠팡": "HANJIN", "네이버": "HANJIN"}, "tracker": "kr.hanjin"},
+    "LOTTE": {"name": "롯데택배", "codes": {"쿠팡": "HYUNDAI", "네이버": "HYUNDAI"}, "tracker": "kr.lotte"},
+    "EPOST": {"name": "우체국택배", "codes": {"쿠팡": "EPOST", "네이버": "EPOST"}, "tracker": "kr.epost"},
+    "KGB": {"name": "로젠택배", "codes": {"쿠팡": "KGB", "네이버": "KGB"}, "tracker": "kr.logen"},
+    "TODAY": {"name": "투데이", "codes": {"쿠팡": "TODAY", "네이버": "TODAY"}, "tracker": "kr.today"},
 }
 
 TRANSPORTS = {"sea": "해운", "air": "항공"}

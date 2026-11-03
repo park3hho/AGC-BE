@@ -17,7 +17,7 @@ NOT_NULL = {"name", "country", "address", "uses", "defaults", "market_codes"}
 
 def courier_list() -> list[dict]:
     """고를 수 있는 국내 택배사 — FE 선택지 · 마켓별 코드 (진실의 원천은 core.shipping_config)."""
-    return [{"key": k, "name": v["name"], "codes": v["codes"]} for k, v in COURIERS.items()]
+    return [{"key": k, "name": v["name"], "codes": v["codes"], "tracker": v.get("tracker")} for k, v in COURIERS.items()]
 
 
 def _route_out(route: dict | None) -> dict | None:
