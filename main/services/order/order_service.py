@@ -700,7 +700,7 @@ def order_dict(o: MarketOrder) -> dict:
     from services.order.pccc import mask_pccc
     return {
         "id": o.id, "code": o.code, "market": o.market, "line_no": o.line_no, "order_no": o.order_no, "ship_unit_no": o.ship_unit_no,
-        "market_status": o.market_status, "confirmed": o.confirmed, "stage": o.stage,
+        "market_status": o.market_status, "confirmed": o.confirmed, "stage": o.stage, "is_test": o.is_test,
         "claim_type": o.claim_type, "claim_status": o.claim_status, "claim_at": _fmt(o.claim_at),
         "claim_reason": o.claim_reason,
         "ordered_at": _fmt(o.ordered_at), "paid_at": _fmt(o.paid_at), "ship_due_at": _fmt(o.ship_due_at),
@@ -736,8 +736,11 @@ def event_dict(e: OrderEvent) -> dict:
 
 class OrderService:
     @staticmethod
-    async def list(stage: str | None, market: str | None, pccc: str | None, page: int, size: int, q: str | None = None) -> dict:
+    async def list(stage: str | None, market: str | None, pccc: str | None, page: int, size: int, q: str | None = None,
+                   include_test: bool = False) -> dict:
         qs = MarketOrder.all()
+        if not include_test:   # 테스트 주문은 화면 목록에서 뺀다 (DB 에는 그대로)
+            qs = qs.filter(is_test=False)
         if q:   # 자사 코드 · 마켓 주문번호 · 줄 번호
             q = q.strip()
             qs = qs.filter(Q(code__icontains=q) | Q(order_no__icontains=q) | Q(line_no__icontains=q))
@@ -884,6 +887,7 @@ class OrderService:
         pick = lambda e: {"event_id": e.id, "order_id": e.order_id, "code": e.order.code, "market": e.order.market,
                           "product_name": e.order.product_name, "summary": e.summary, "at": e.created_at.isoformat(),
                           "auto": bool((e.data or {}).get("run", {}).get("auto"))}
+        evs = [e for e in evs if not (e.order and e.order.is_test)]   # 테스트 주문 알림은 띄우지 않는다
         return {"last_event_id": last_id,
                 "new_orders": [pick(e) for e in evs if e.kind == "collected"],
                 "claims": [pick(e) for e in evs if e.kind == "claim"]}

@@ -54,6 +54,8 @@ class MarketOrder(BaseModel):
     # 실제 정산액 (원) — 쿠팡 매출내역(revenue-history, 구매확정 뒤 생김). 없으면 화면은 수수료율로 추정 (2026-10-27)
     settlement_actual = fields.IntField(null=True)
     settlement_date = fields.DateField(null=True)                   # 정산(예정)일
+    # 테스트 주문 (사장 본인 시험 주문, 2026-11-04) — DB 에는 남기고 화면 목록·홈·알림에서는 뺀다. 목록 API 는 include_test=true 일 때만 같이 준다
+    is_test = fields.BooleanField(default=False)
 
     class Meta:
         table = "market_order"

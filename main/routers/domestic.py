@@ -28,12 +28,13 @@ async def list_domestic(
     status: Optional[str] = Query(default=None),
     q: Optional[str] = Query(default=None, max_length=60),
     limit: int = Query(default=100, ge=1, le=500),
+    include_test: bool = Query(default=False),
     auth=Depends(require_feature(Feature.ORDER)),
 ):
     if status and status not in DOMESTIC_STATUS:
         raise HTTPException(status_code=400, detail="국내 배송 상태가 올바르지 않습니다.")
     try:
-        return success(items=await DomesticService.list(order_id, status, q, limit), status=DOMESTIC_STATUS)
+        return success(items=await DomesticService.list(order_id, status, q, limit, include_test), status=DOMESTIC_STATUS)
     except HTTPException:
         raise
     except Exception as e:

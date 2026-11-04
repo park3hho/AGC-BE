@@ -37,10 +37,11 @@ async def list_orders(
     page: int = Query(default=1, ge=1),
     size: int = Query(default=50, ge=1, le=200),
     q: Optional[str] = Query(default=None, max_length=60),   # 자사 코드(OR-…) · 마켓 주문번호 검색
+    include_test: bool = Query(default=False),               # 테스트 주문도 같이 (기본은 빼고 줌 — 2026-11-04)
     auth=Depends(require_feature(Feature.ORDER)),
 ):
     try:
-        return success(**await OrderService.list(stage, market, pccc, page, size, q))
+        return success(**await OrderService.list(stage, market, pccc, page, size, q, include_test))
     except HTTPException:
         raise
     except Exception as e:

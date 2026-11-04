@@ -110,10 +110,14 @@ def _items(body) -> list[dict]:
 
 class TaobaoPurchaseService:
     @staticmethod
-    async def list(order_id: int | None, status: str | None, q: str | None, limit: int) -> list[dict]:
+    async def list(order_id: int | None, status: str | None, q: str | None, limit: int, include_test: bool = False) -> list[dict]:
         qs = alive()
         if order_id:
             qs = qs.filter(order_id=order_id)
+        elif not include_test:   # 테스트 주문에 붙은 기록은 목록에서 뺀다 (주문을 지정하면 그대로 보여 줌)
+            test_ids = await MarketOrder.filter(is_test=True).values_list("id", flat=True)
+            if test_ids:
+                qs = qs.exclude(order_id__in=list(test_ids))
         if status:
             qs = qs.filter(cn_status=status)
         if q:

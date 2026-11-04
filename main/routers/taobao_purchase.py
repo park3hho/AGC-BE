@@ -28,12 +28,13 @@ async def list_purchases(
     cn_status: Optional[str] = Query(default=None),
     q: Optional[str] = Query(default=None, max_length=40),
     limit: int = Query(default=100, ge=1, le=500),
+    include_test: bool = Query(default=False),
     auth=Depends(require_feature(Feature.ORDER)),
 ):
     if cn_status and cn_status not in CN_STATUS:
         raise HTTPException(status_code=400, detail="중국 배송 상태가 올바르지 않습니다.")
     try:
-        items = await TaobaoPurchaseService.list(order_id, cn_status, q, limit)
+        items = await TaobaoPurchaseService.list(order_id, cn_status, q, limit, include_test)
         return success(items=items, cn_status=CN_STATUS)
     except HTTPException:
         raise
