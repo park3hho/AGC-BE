@@ -543,6 +543,30 @@ async def _default_range(market: str, now: datetime) -> tuple[datetime, datetime
     return max(start, now - MAX_RANGE), now
 
 
+async def refresh_coupang_open(actor: dict, run) -> int:
+    """아직 안 끝난 쿠팡 주문을 묶음배송번호로 한 건씩 다시 읽는다 (2026-11-06).
+    발주서 목록 조회는 결제완료·상품준비중(ACCEPT·INSTRUCT)만 보므로, 송장을 올린 뒤
+    배송지시·배송중·배송완료(DEPARTURE·DELIVERING·FINAL_DELIVERY)로 바뀐 걸 AGC 가 못 따라갔다
+    (11-04~05 배송완료된 차파이·미닛메이드가 AGC 에서 상품준비중으로 남음). 반환: 바뀐 줄 수."""
+    changed, seen = 0, set()
+    rows = await MarketOrder.filter(market="coupang", stage__in=["received", "processing"]).exclude(market_status="ACCEPT")
+    for o in rows:
+        if not o.ship_unit_no or o.ship_unit_no in seen:
+            continue
+        seen.add(o.ship_unit_no)
+        try:
+            box = await mc.coupang_ordersheet(o.ship_unit_no)
+        except Exception as e:   # 취소·반품된 건은 400 — 클레임 수집이 따로 처리
+            logger.info(f"쿠팡 발주서 단건 실패: {o.code} {str(e)[:120]}")
+            continue
+        if not box:
+            continue
+        for ln in parse_coupang(box):
+            if await upsert_line(ln, actor, run) == "changed":
+                changed += 1
+    return changed
+
+
 async def collect_market(market: str, auth: dict | None, trigger: str = "manual", since: datetime | None = None) -> OrderSyncRun:
     if market not in MARKETS:
         raise HTTPException(status_code=400, detail="알 수 없는 마켓입니다.")
@@ -573,6 +597,8 @@ async def collect_market(market: str, auth: dict | None, trigger: str = "manual"
                     run.created += 1
                 elif r == "changed":
                     run.changed += 1
+            if market == "coupang":   # 송장 올린 뒤 상태(배송중·배송완료)는 발주서 목록 조회에 안 나온다 → 한 건씩
+                run.changed += await refresh_coupang_open(actor, run)
             if market == "coupang":   # 취소·반품 요청은 발주서 목록에 안 나온다 → 따로
                 run.changed += await apply_coupang_claims(start, end, actor, run)
                 try:   # 실제 정산액 — 실패해도 주문 수집은 성공으로 둔다
