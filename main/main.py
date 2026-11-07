@@ -26,6 +26,7 @@ from routers import (
     exchange_rate,
     health,
     listing,
+    competitor,
     price_survey,
     pricing,
     product,
@@ -82,6 +83,7 @@ app.include_router(taobao_purchase.router)
 app.include_router(jiyun.router)
 app.include_router(domestic.router)
 app.include_router(listing.router)
+app.include_router(competitor.router)
 app.include_router(product.router)
 app.include_router(price_survey.router)
 app.include_router(pricing.router)
