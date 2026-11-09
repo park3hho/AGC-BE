@@ -119,6 +119,19 @@ def parse_naver(item: dict) -> list[dict]:
     }]
 
 
+def _due_date(v) -> datetime | None:
+    """쿠팡 발송기한(estimatedShippingDate)은 날짜만 의미 있다. 목록 조회는 '2026-11-23',
+    묶음배송번호 단건 조회는 시각이 붙은 형식을 주어 수집 때마다 값이 번갈아 바뀌고 '주문 변경' 기록이
+    수백 개씩 쌓였다 → 날짜만 떼서 KST 자정으로 맞춘다."""
+    if not v:
+        return None
+    try:
+        d = datetime.fromisoformat(str(v)[:10])
+    except ValueError:
+        return _dt(v)
+    return d.replace(tzinfo=KST)
+
+
 def parse_coupang(box: dict) -> list[dict]:
     rc, ov = box.get("receiver") or {}, box.get("overseaShippingInfoDto") or {}
     status = box.get("status") or ""
@@ -130,7 +143,7 @@ def parse_coupang(box: dict) -> list[dict]:
             "ship_unit_no": str(box["shipmentBoxId"]), "market_status": status,
             "confirmed": status not in ("ACCEPT", ""),
             "stage": "cancelled" if oi.get("canceled") else COUPANG_STAGE.get(status, "received"),
-            "ordered_at": _dt(box.get("orderedAt")), "paid_at": _dt(box.get("paidAt")), "ship_due_at": _dt(oi.get("estimatedShippingDate")),
+            "ordered_at": _dt(box.get("orderedAt")), "paid_at": _dt(box.get("paidAt")), "ship_due_at": _due_date(oi.get("estimatedShippingDate")),
             "product_name": (oi.get("sellerProductName") or oi.get("vendorItemName") or "")[:300],
             "option_name": oi.get("sellerProductItemName") or oi.get("vendorItemName") or None,
             "seller_code": oi.get("externalVendorSkuCode") or None,

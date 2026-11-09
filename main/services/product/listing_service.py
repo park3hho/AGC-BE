@@ -112,17 +112,35 @@ class ListingService:
     # ── 쿠팡에서 불러오기 ─────────────────────────────────────
 
     @staticmethod
-    async def sync_coupang(dry_run: bool = False) -> dict:
+    async def sync_coupang(dry_run: bool = False, full: bool = False) -> dict:
+        """쿠팡 등록 상품 → market_listing.
+
+        기본(빠름): 목록 요약의 상태·상품명이 DB 와 같고 옵션 정보가 이미 있는 상품은 상세 조회를 건너뛴다
+        (약 780개 → 바뀐 몇 개만 상세 조회). full=True 면 전부 상세 조회 (Wing 에서 가격만 바꾼 경우 등).
+        저장은 값이 실제로 바뀐 줄만 하고, updated 도 바뀐 줄만 센다.
+        """
+        known = {}
+        if not full:
+            for r in await MarketListing.filter(platform=Platform.COUPANG).values(
+                    "market_product_id", "status", "title", "items", "deleted_at"):
+                items = r["items"] or []
+                ok = bool(items) and all(i.get("market_item_id") for i in items)
+                known[str(r["market_product_id"])] = (r["status"], r["title"], ok, r["deleted_at"] is not None)
         try:
-            found = await _coupang_listings()
+            found = await _coupang_listings(known)
         except (MarketApiError, KeyError) as e:
             raise HTTPException(status_code=502, detail=f"쿠팡 상품을 불러오지 못했습니다 ({str(e)[:120]}).") from None
 
-        codes = {f["product_code"] for f in found if f["product_code"]}
+        codes = {f["product_code"] for f in found if f.get("product_code")}
         products = {p.code: p.id for p in await Product.filter(code__in=list(codes), deleted_at=None)}
         now = datetime.now(timezone.utc)
-        result = {"total": len(found), "created": 0, "updated": 0, "skipped_deleted": 0, "unmatched": [], "items": []}
+        result = {"total": len(found), "created": 0, "updated": 0, "unchanged": 0, "detail_fetched": 0,
+                  "skipped_deleted": 0, "unmatched": [], "items": []}
         for f in found:
+            if f.get("unchanged"):
+                result["unchanged"] += 1
+                continue
+            result["detail_fetched"] += 1
             pid = products.get(f["product_code"] or "")
             if not pid:
                 result["unmatched"].append({"market_product_id": f["market_product_id"], "title": f["title"]})
@@ -137,6 +155,12 @@ class ListingService:
                 result["skipped_deleted"] += 1
                 continue
             if old:
+                changed = [k for k, v in values.items() if k != "synced_at" and getattr(old, k) != v]
+                if not changed:
+                    old.synced_at = now
+                    await old.save(update_fields=["synced_at"])
+                    result["unchanged"] += 1
+                    continue
                 for k, v in values.items():
                     setattr(old, k, v)
                 await old.save()
@@ -164,7 +188,9 @@ def _ok(data: dict) -> dict:
     return data
 
 
-async def _coupang_listings() -> list[dict]:
+async def _coupang_listings(known: dict | None = None) -> list[dict]:
+    """known: {sellerProductId: (status, title, 옵션정보 있음, 삭제됨)} — 요약과 같으면 상세 조회 생략."""
+    known = known or {}
     vendor = await coupang_vendor_id()
     summaries: list[dict] = []
     token = ""
@@ -182,6 +208,10 @@ async def _coupang_listings() -> list[dict]:
     for s in summaries:
         spid = str(s.get("sellerProductId") or "")
         if not spid:
+            continue
+        k = known.get(spid)
+        if k and (k[3] or (k[2] and k[0] == s.get("statusName") and k[1] == s.get("sellerProductName"))):
+            out.append({"market_product_id": spid, "unchanged": True})
             continue
         d = _ok(await _coupang_get(f"{COUPANG_PRODUCTS_PATH}/{spid}", "")).get("data") or {}
         items, code = [], None

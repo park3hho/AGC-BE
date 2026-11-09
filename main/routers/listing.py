@@ -38,11 +38,14 @@ async def list_listings(
 
 
 @router.post("/sync/coupang")    # ★ /{listing_id} 보다 먼저
-async def sync_coupang(dry_run: bool = Query(default=False), auth=Depends(require_feature(Feature.LISTING))):
+async def sync_coupang(dry_run: bool = Query(default=False),
+                       full: bool = Query(default=False),   # true = 전부 상세 조회 (느림)
+                       auth=Depends(require_feature(Feature.LISTING))):
     try:
-        r = await ListingService.sync_coupang(dry_run)
+        r = await ListingService.sync_coupang(dry_run, full)
         logger.info(
             f"쿠팡 상품 불러오기: total={r['total']} created={r['created']} updated={r['updated']} "
+            f"unchanged={r['unchanged']} detail_fetched={r['detail_fetched']} full={full} "
             f"unmatched={len(r['unmatched'])} dry_run={dry_run} by={auth['user_id']}"
         )
         return success(**r)
