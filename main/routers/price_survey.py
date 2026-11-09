@@ -28,7 +28,7 @@ async def create_price_survey(body: PriceSurveyCreate, auth=Depends(require_feat
 async def list_price_surveys(
     product_code: str | None = Query(default=None, max_length=50),
     page: int = Query(default=1, ge=1),
-    size: int = Query(default=20, ge=1, le=100),
+    size: int = Query(default=20, ge=1, le=500),   # 500 = FE requestAll 한 번에 (2026-11-09)
     auth=Depends(require_auth),
 ):
     try:

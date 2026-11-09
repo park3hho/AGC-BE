@@ -63,6 +63,12 @@ class ListingService:
         return [listing_dict(x) for x in rows]
 
     @staticmethod
+    async def brief() -> list[dict]:
+        """전체 목록의 짧은 판 — 상품 목록의 마켓 칸(판매처별 수 · 첫 업로드)만 쓴다 (2026-11-09 로딩 속도: 1.4MB → 약 0.1MB)."""
+        rows = await alive().order_by("product_id", "platform", "listed_at", "id").values("id", "product_id", "platform", "listed_at")
+        return [{**r, "listed_at": r["listed_at"].isoformat() if r["listed_at"] else None} for r in rows]
+
+    @staticmethod
     async def create(body: ListingCreate, auth: dict) -> dict:
         if not await Product.filter(id=body.product_id, deleted_at=None).exists():
             raise HTTPException(status_code=404, detail="제품을 찾을 수 없습니다.")

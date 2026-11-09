@@ -22,8 +22,14 @@ def _fail(what: str, e: Exception, listing_id=None):
 
 
 @router.get("")
-async def list_listings(product_id: Optional[int] = Query(default=None, ge=1), auth=Depends(require_auth)):
+async def list_listings(
+    product_id: Optional[int] = Query(default=None, ge=1),
+    brief: bool = Query(default=False),   # true = id · product_id · platform · listed_at 만 (상품 목록용)
+    auth=Depends(require_auth),
+):
     try:
+        if brief and not product_id:
+            return success(items=await ListingService.brief())
         return success(items=await ListingService.list(product_id))
     except HTTPException:
         raise

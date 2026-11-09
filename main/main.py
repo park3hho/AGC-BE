@@ -21,6 +21,7 @@ from routers import (
     taobao_purchase,
     jiyun,
     domestic,
+    thumb,
     auth,
     detail_page,
     exchange_rate,
@@ -82,6 +83,7 @@ app.include_router(order.router)
 app.include_router(taobao_purchase.router)
 app.include_router(jiyun.router)
 app.include_router(domestic.router)
+app.include_router(thumb.router)   # 목록용 작은 사진 (2026-11-09)
 app.include_router(listing.router)
 app.include_router(competitor.router)
 app.include_router(product.router)
@@ -94,7 +96,18 @@ app.include_router(upload.router)
 
 # 업로드된 사진 내려주기 — /files/photos/2026/10/xxx.jpg
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
-app.mount(UPLOAD_URL_PREFIX, StaticFiles(directory=UPLOAD_DIR), name="files")
+class _UploadFiles(StaticFiles):
+    """업로드 사진(photos/)은 이름이 uuid 라 내용이 안 바뀐다 → 1년 캐시 (2026-11-09 로딩 속도).
+    detail/ 은 같은 이름으로 다시 만들 수 있어 기본 캐시 그대로."""
+
+    async def get_response(self, path, scope):
+        resp = await super().get_response(path, scope)
+        if resp.status_code == 200 and path.replace("\\", "/").startswith("photos/"):
+            resp.headers["Cache-Control"] = "public, max-age=31536000, immutable"
+        return resp
+
+
+app.mount(UPLOAD_URL_PREFIX, _UploadFiles(directory=UPLOAD_DIR), name="files")
 
 
 @app.get("/")

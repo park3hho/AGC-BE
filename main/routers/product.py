@@ -28,7 +28,7 @@ async def create_product(body: ProductCreate, auth=Depends(require_feature(Featu
 async def list_products(
     q: str | None = Query(default=None, max_length=100),
     page: int = Query(default=1, ge=1),
-    size: int = Query(default=20, ge=1, le=100),
+    size: int = Query(default=20, ge=1, le=500),   # 500 = FE requestAll 한 번에 (2026-11-09)
     category: str | None = Query(default=None, max_length=20),     # 대분류 (utils/category.py)
     subcategory: str | None = Query(default=None, max_length=20),  # 소분류 · none = 안 정한 것
     auth=Depends(require_auth),
