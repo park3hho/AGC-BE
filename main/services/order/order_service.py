@@ -355,6 +355,15 @@ async def upsert_line(line: dict, actor: dict, run) -> str:
             await run_pccc_check(o, actor, "새 주문", run)
         return "created"
 
+    # 쿠팡은 가끔 같은 주문의 수취인·통관부호·전화를 빈칸으로 준다(11-10 17:41~ 관찰, 다음 수집엔 다시 채워 옴).
+    # 빈 값으로 덮으면 통관부호가 '없음'이 되고 홈에 '고객 연락 필요'가 뜬다 → 이미 있는 값은 지키고 수취인 변경으로 보지 않는다.
+    if not (line["pccc"] or line["receiver_name"] or line["phone"]) and (o.pccc_enc or o.receiver_name):
+        fields.pop("receiver_name", None)
+        fields.pop("receiver_hash", None)
+        fields.pop("raw_enc", None)
+        secret = {}
+        fp = o.receiver_hash
+
     # 단계 = 마켓 상태만이 아니라 타오바오 구매 기록·클레임까지 보고 정한다 (decide_stage)
     fields["stage"] = decide_stage(fields["stage"], _claim_cancelled(o), await has_purchase(o.id))
     diff = {k: [_fmt(getattr(o, k)), _fmt(fields[k])] for k in TRACKED if k in fields and getattr(o, k) != fields[k]}
