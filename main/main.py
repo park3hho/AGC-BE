@@ -28,6 +28,7 @@ from routers import (
     health,
     listing,
     competitor,
+    sales,
     price_survey,
     pricing,
     product,
@@ -86,6 +87,7 @@ app.include_router(domestic.router)
 app.include_router(thumb.router)   # 목록용 작은 사진 (2026-11-09)
 app.include_router(listing.router)
 app.include_router(competitor.router)
+app.include_router(sales.router)   # 매출 현황 (2026-11-10)
 app.include_router(product.router)
 app.include_router(price_survey.router)
 app.include_router(pricing.router)
