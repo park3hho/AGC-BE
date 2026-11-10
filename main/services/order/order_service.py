@@ -580,6 +580,22 @@ async def refresh_coupang_open(actor: dict, run) -> int:
     return changed
 
 
+async def refresh_naver_open(actor: dict, run, skip_ids: set[str] | None = None) -> int:
+    """아직 안 끝난 네이버 주문을 상품주문번호로 다시 읽는다 (2026-11-10).
+    변경 목록(last-changed-statuses)에 배송완료(DELIVERED)가 빠지는 경우가 있어, 11-04·11-07 배송완료된
+    3건이 AGC 에서 배송중으로 남았다. 한 번에 300건씩 조회하므로 가볍다. 반환: 바뀐 줄 수."""
+    rows = await MarketOrder.filter(market="naver", stage__in=["received", "processing"]).values_list("line_no", flat=True)
+    ids = [i for i in dict.fromkeys(rows) if i and i not in (skip_ids or set())]
+    if not ids:
+        return 0
+    changed = 0
+    for it in await mc.naver_product_orders(ids):
+        for ln in parse_naver(it):
+            if await upsert_line(ln, actor, run) == "changed":
+                changed += 1
+    return changed
+
+
 async def collect_market(market: str, auth: dict | None, trigger: str = "manual", since: datetime | None = None) -> OrderSyncRun:
     if market not in MARKETS:
         raise HTTPException(status_code=400, detail="알 수 없는 마켓입니다.")
@@ -610,6 +626,8 @@ async def collect_market(market: str, auth: dict | None, trigger: str = "manual"
                     run.created += 1
                 elif r == "changed":
                     run.changed += 1
+            if market == "naver":    # 변경 목록에 배송완료가 빠질 때가 있다 → 안 끝난 주문 다시 읽기
+                run.changed += await refresh_naver_open(actor, run, {ln["line_no"] for ln in lines})
             if market == "coupang":   # 송장 올린 뒤 상태(배송중·배송완료)는 발주서 목록 조회에 안 나온다 → 한 건씩
                 run.changed += await refresh_coupang_open(actor, run)
             if market == "coupang":   # 취소·반품 요청은 발주서 목록에 안 나온다 → 따로
