@@ -312,9 +312,16 @@ async def progress_of(order_ids: list[int]) -> dict[int, dict]:
     for p in await TaobaoPurchase.filter(order_id__in=order_ids, deleted_at=None).exclude(cn_status="cancelled"):
         step = {"ordered": 0, "shipped": 1, "arrived": 2}.get(p.cn_status, 0)
         out[p.order_id] = max(out.get(p.order_id, 0), step)
+    arrived_parcels: dict[int, set] = {}   # 창고에 들어온 소포 송장 (구매기록 cn_tracking_no)
+    for p in await TaobaoPurchase.filter(order_id__in=order_ids, deleted_at=None, cn_status="arrived"):
+        if p.cn_tracking_no:
+            arrived_parcels.setdefault(p.order_id, set()).add(p.cn_tracking_no.strip().upper())
+    paid_parcels: dict[int, set] = {}      # 집운에 묶인 소포 송장 (집운 packages)
     jiyun: set[int] = set()      # 집운 기록 있음 — 모바일 '다음 할 일' 판정용 (2026-10-30)
     tracking: dict[int, tuple] = {}   # 국내 송장 있음 — (택배사 코드, 송장 번호) · 목록에서 '배송 중 — CJ대한통운 …' (2026-11-02)
     for j in await JiyunShipment.filter(order_id__in=order_ids, deleted_at=None).exclude(status="cancelled"):
+        for pk in (j.packages or []):
+            paid_parcels.setdefault(j.order_id, set()).add(str(pk).strip().upper())
         step = 3 if j.status == "dispatched" else 2
         out[j.order_id] = max(out.get(j.order_id, 0), step)
         jiyun.add(j.order_id)
@@ -322,6 +329,8 @@ async def progress_of(order_ids: list[int]) -> dict[int, dict]:
             tracking[j.order_id] = (j.kr_courier, j.kr_tracking_no)
     return {oid: {"step": s, "label": PROGRESS_STEPS[s], "total": len(PROGRESS_STEPS),
                   "jiyun": oid in jiyun, "tracking": oid in tracking,
+                  # 창고에 들어왔는데 어느 집운에도 안 묶인 소포가 있음 — 상자가 나눠 온 주문의 두 번째 상자 (2026-11-11)
+                  "jiyun_pending": bool(arrived_parcels.get(oid, set()) - paid_parcels.get(oid, set())) if oid in jiyun else False,
                   "kr_courier": tracking.get(oid, (None, None))[0], "kr_tracking_no": tracking.get(oid, (None, None))[1]}
             for oid, s in out.items()}
 
