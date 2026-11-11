@@ -366,12 +366,27 @@ async def upsert_line(line: dict, actor: dict, run) -> str:
 
     # 쿠팡은 가끔 같은 주문의 수취인·통관부호·전화를 빈칸으로 준다(11-10 17:41~ 관찰, 다음 수집엔 다시 채워 옴).
     # 빈 값으로 덮으면 통관부호가 '없음'이 되고 홈에 '고객 연락 필요'가 뜬다 → 이미 있는 값은 지키고 수취인 변경으로 보지 않는다.
-    if not (line["pccc"] or line["receiver_name"] or line["phone"]) and (o.pccc_enc or o.receiver_name):
+    # 네이버는 구매확정(PURCHASE_DECIDED) 뒤 주문 조회에서 통관부호를 빼고 준다(11-11 OR-261105-0001 관찰).
+    # 그래서 칸마다 따로 본다: 새 값이 비었는데 저장된 값이 있으면 저장된 값을 지킨다.
+    # 끝난 주문(배송완료·구매확정·취소)은 수취인·통관 정보를 아예 바꾸지 않고 통관부호 재검증도 하지 않는다.
+    finished = fields.get("stage") in ("done", "cancelled") or o.stage in ("done", "cancelled")
+    blank_all = not (line["pccc"] or line["receiver_name"] or line["phone"])
+    if (finished or blank_all) and (o.pccc_enc or o.receiver_name):
         fields.pop("receiver_name", None)
         fields.pop("receiver_hash", None)
         fields.pop("raw_enc", None)
         secret = {}
         fp = o.receiver_hash
+    else:
+        for key, val in (("pccc_enc", line["pccc"]), ("receiver_phone_enc", line["phone"]), ("receiver_address_enc", line["address"])):
+            if not val and getattr(o, key):
+                secret.pop(key, None)
+        if not line["receiver_name"] and o.receiver_name:
+            fields.pop("receiver_name", None)
+        if not line["pccc"] and o.pccc_enc:   # 통관부호만 빠진 경우 — 저장값으로 지문을 다시 만든다
+            fp = receiver_fingerprint(_dec(o.pccc_enc), line["receiver_name"] or o.receiver_name or "",
+                                      line["phone"] or _dec(o.receiver_phone_enc) or "", line["zip"] or o.receiver_zip or "")
+            fields["receiver_hash"] = fp
 
     # 단계 = 마켓 상태만이 아니라 타오바오 구매 기록·클레임까지 보고 정한다 (decide_stage)
     fields["stage"] = decide_stage(fields["stage"], _claim_cancelled(o), await has_purchase(o.id))
