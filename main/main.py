@@ -14,6 +14,7 @@ from database import TORTOISE_ORM
 from services.pricing.exchange_rate_service import fx_auto_loop
 from services.order.order_service import order_poll_loop
 from routers import (
+    import_decl,
     company_reminder,
     shipping_address,
     order,
@@ -94,6 +95,7 @@ app.include_router(pricing.router)
 app.include_router(detail_page.router)
 app.include_router(exchange_rate.router)
 app.include_router(shipping.router)
+app.include_router(import_decl.router)   # 수입식품 구매대행 수입신고 (2026-11-11)
 app.include_router(upload.router)
 
 # 업로드된 사진 내려주기 — /files/photos/2026/10/xxx.jpg

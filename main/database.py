@@ -23,6 +23,7 @@ TORTOISE_ORM = {
                 "models.order.jiyun",   # 집운 기록 — 배송 요청 · 배송비 결제 · 출고 · 국제 운송장 · 국내 송장
                 "models.order.domestic",   # 국내 배송 기록 — 국내 송장 · 마켓 발송처리 · 배송 조회 (2026-11-03)
                 "models.order.document",   # 주문 증빙 파일 — 타오바오 영수증 · 집운 결제 내역 · 마켓 정산 내역
+                "models.order.import_decl",   # 수입식품 구매대행 수입신고 (2026-11-11)
                 "aerich.models",
             ],
             "default_connection": "default",

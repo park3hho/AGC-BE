@@ -26,6 +26,7 @@ DOC_KINDS = {
     "jiyun": "집운 배송비 결제 내역",
     "market": "마켓 정산 · 수수료 내역",
     "card": "카드 · 간편결제 청구 내역",
+    "import_decl": "수입신고서 (유니패스)",   # 2026-11-11
     "other": "기타",
 }
 DOC_TYPES = {"pdf": "application/pdf", "jpg": "image/jpeg", "png": "image/png", "webp": "image/webp"}

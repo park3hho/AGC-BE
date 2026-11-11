@@ -371,6 +371,8 @@ async def progress_of(order_ids: list[int]) -> dict[int, dict]:
             arrived_parcels.setdefault(p.order_id, set()).add(p.cn_tracking_no.strip().upper())
     paid_parcels: dict[int, set] = {}      # 집운에 묶인 소포 송장 (집운 packages)
     jiyun: set[int] = set()      # 집운 기록 있음 — 모바일 '다음 할 일' 판정용 (2026-10-30)
+    decl_missing: set[int] = set()
+    decl_bl: dict[int, set] = {}   # 주문 → 신고해야 할 B/L
     tracking: dict[int, tuple] = {}   # 국내 송장 있음 — (택배사 코드, 송장 번호) · 목록에서 '배송 중 — CJ대한통운 …' (2026-11-02)
     for j in await JiyunShipment.filter(order_id__in=order_ids, deleted_at=None).exclude(status="cancelled"):
         for pk in (j.packages or []):
@@ -378,8 +380,18 @@ async def progress_of(order_ids: list[int]) -> dict[int, dict]:
         step = 3 if j.status == "dispatched" else 2
         out[j.order_id] = max(out.get(j.order_id, 0), step)
         jiyun.add(j.order_id)
+        # 수입식품 구매대행 수입신고 (2026-11-11) — 출고돼 B/L 이 있는데 통관 전이고 신고 기록이 없으면 할 일
+        if j.status == "dispatched" and j.hbl and not j.customs_cleared_at:
+            decl_missing.add(j.order_id)   # 아래에서 신고서가 있는 B/L 은 뺀다
+            decl_bl.setdefault(j.order_id, set()).add(j.hbl)
         if j.kr_tracking_no:
             tracking[j.order_id] = (j.kr_courier, j.kr_tracking_no)
+    if decl_missing:   # 낸 신고서(작성 중 포함)가 묶인 주문은 할 일 아님
+        from models.order.import_decl import ImportDeclaration
+        bls = {b for v in decl_bl.values() for b in v}
+        done = set(await ImportDeclaration.filter(deleted_at=None, bl_no__in=list(bls)).exclude(
+            status="rejected").values_list("bl_no", flat=True))
+        decl_missing = {oid for oid in decl_missing if decl_bl.get(oid, set()) - done}
     keys = dict(await MarketOrder.filter(id__in=list(out)).values_list("id", "bundle_key"))
     binfo = await bundle_info({k for k in keys.values() if k})
     bundle_of = lambda oid: (b if (b := binfo.get(keys.get(oid))) and b["size"] > 1 else None)
@@ -387,6 +399,7 @@ async def progress_of(order_ids: list[int]) -> dict[int, dict]:
                   "jiyun": oid in jiyun, "tracking": oid in tracking,
                   # 집운 묶음 (2026-11-11) — 2건 이상일 때만. ready 가 아니면 '집운 결제' 대신 기다림
                   "bundle": bundle_of(oid),
+                  "decl_missing": oid in decl_missing,
                   # 창고에 들어왔는데 어느 집운에도 안 묶인 소포가 있음 — 상자가 나눠 온 주문의 두 번째 상자 (2026-11-11)
                   "jiyun_pending": bool(arrived_parcels.get(oid, set()) - paid_parcels.get(oid, set())) if oid in jiyun else False,
                   "kr_courier": tracking.get(oid, (None, None))[0], "kr_tracking_no": tracking.get(oid, (None, None))[1]}
