@@ -138,3 +138,19 @@ async def confirm_order(order_id: int, auth=Depends(require_feature(Feature.ORDE
         raise
     except Exception as e:
         raise _fail("발주확인", e)
+
+class BundleBody(BaseModel):
+    key: Optional[str] = Field(default=None, max_length=30)   # 없음 = 따로 보내기
+
+
+@router.patch("/{order_id}/bundle")
+async def set_bundle(order_id: int, body: BundleBody, auth=Depends(require_feature(Feature.ORDER))):
+    """집운 묶음 바꾸기 — 같은 고객 주문과 한 번에 / 따로 (2026-11-11)."""
+    try:
+        data = await OrderService.set_bundle(order_id, body.key, auth)
+        logger.info(f"집운 묶음 변경: order_id={order_id} key={data['order']['bundle_key']} by={auth['user_id']}")
+        return success(**data)
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise _fail("집운 묶음 변경", e)

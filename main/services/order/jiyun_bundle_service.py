@@ -57,14 +57,14 @@ async def candidates(include_test: bool = False) -> list[dict]:
     groups: dict[tuple, dict] = {}
     for oid, ps in parcels.items():
         o = orders[oid]
-        key = _receiver_key(o)
+        key = o.bundle_key or _receiver_key(o)   # 주문 들어올 때 정한 묶음 (따로 보내기로 바꿀 수 있음)
         g = groups.setdefault(key, {"receiver": mask_name(o.receiver_name or ""),
                                     "region": _short_address(_dec(o.receiver_address_enc)) or None,
                                     "orders": []})
         g["orders"].append({
             "id": o.id, "code": o.code, "market": o.market, "product_name": o.product_name,
             "option_name": o.option_name, "quantity": o.quantity, "is_test": o.is_test,
-            "has_jiyun": oid in in_jiyun, "parcels": ps,
+            "has_jiyun": oid in in_jiyun, "parcels": ps, "bundle_key": o.bundle_key,
             "ship_due_at": o.ship_due_at.isoformat() if o.ship_due_at else None,
         })
     out = []
