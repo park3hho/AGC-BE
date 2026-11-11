@@ -53,7 +53,11 @@ class MarketOrder(BaseModel):
     claim_reason = fields.CharField(max_length=300, null=True)     # 사람이 읽는 사유 — 예: 판매자 취소 · 재고연동오류 (2026-10-27)
     # 실제 정산액 (원) — 쿠팡 매출내역(revenue-history, 구매확정 뒤 생김). 없으면 화면은 수수료율로 추정 (2026-10-27)
     settlement_actual = fields.IntField(null=True)
-    settlement_date = fields.DateField(null=True)                   # 정산(예정)일
+    settlement_date = fields.DateField(null=True)                   # 정산(예정)일 — 쿠팡은 70% 지급예정일, 네이버는 정산 예정일
+    # 정산 단계 (2026-11-11) — 배송완료 → 구매확정 → (쿠팡) 정산 70% → 정산완료
+    settle_recognized_on = fields.DateField(null=True)              # 구매확정(매출인식)일 — 쿠팡 recognitionDate · 네이버 settleBasisDate
+    settle_final_on = fields.DateField(null=True)                   # 쿠팡 유보액(30%) 지급예정일 (주정산)
+    settle_paid_on = fields.DateField(null=True)                    # 정산 완료일 — 네이버 settleCompleteDate
     # 테스트 주문 (사장 본인 시험 주문, 2026-11-04) — DB 에는 남기고 화면 목록·홈·알림에서는 뺀다. 목록 API 는 include_test=true 일 때만 같이 준다
     is_test = fields.BooleanField(default=False)
 

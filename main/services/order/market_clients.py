@@ -99,6 +99,14 @@ async def naver_product_orders(ids: list[str]) -> list[dict]:
     return out
 
 
+async def naver_settle_case(product_order_id: str) -> list[dict]:
+    """건별 정산 내역 — 상품주문 1건의 정산 기준일·예정일·완료일·정산 예정 금액 (2026-11-11)."""
+    token = await _naver_auth()
+    q = urllib.parse.urlencode({"productOrderId": product_order_id, "pageNumber": 1, "pageSize": 20})
+    data = await http("GET", f"{NAVER_BASE}/v1/pay-settle/settle/case?{q}", {"Authorization": f"Bearer {token}"})
+    return data.get("elements") or []
+
+
 # ---------------------------------------------------------------- 쿠팡
 COUPANG_BASE = "https://api-gateway.coupang.com"
 COUPANG_SERVICE = COUPANG_OPENAPI  # HQ API 키 code

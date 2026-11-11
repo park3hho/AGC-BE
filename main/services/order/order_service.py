@@ -489,6 +489,48 @@ REVENUE_DAYS = 31
 _revenue_last: dict = {"at": None}
 
 
+def _d(v):
+    """'2026-11-12' → date (없거나 이상하면 None)."""
+    try:
+        return datetime.fromisoformat(str(v)[:10]).date() if v else None
+    except ValueError:
+        return None
+
+
+_naver_settle_last = {"at": None}
+
+
+async def apply_naver_settle(actor: dict, run, force: bool = False) -> int:
+    """네이버 구매확정 주문의 정산 예정일·완료일·정산액 (2026-11-11). 건별 정산 내역(GET /v1/pay-settle/settle/case)을
+    상품주문번호로 한 건씩 본다 — 정산 완료 전인 구매확정 주문만. 1시간에 한 번. 반환: 바뀐 줄 수."""
+    now = datetime.now(timezone.utc)
+    if not force and _naver_settle_last["at"] and now - _naver_settle_last["at"] < REVENUE_EVERY:
+        return 0
+    _naver_settle_last["at"] = now
+    changed = 0
+    for o in await MarketOrder.filter(market="naver", is_test=False, market_status="PURCHASE_DECIDED", settle_paid_on__isnull=True):
+        try:
+            data = await mc.naver_settle_case(o.line_no)
+        except mc.MarketApiError as e:
+            logger.info(f"네이버 정산 조회 실패: {o.code} {str(e)[:120]}")
+            continue
+        el = next((e for e in data if e.get("productOrderType") == "PROD_ORDER" and e.get("settleType") == "NORMAL_SETTLE_ORIGINAL"), None)
+        if not el:
+            continue
+        exp, paid, basis = _d(el.get("settleExpectDate")), _d(el.get("settleCompleteDate")), _d(el.get("settleBasisDate"))
+        amt = el.get("settleExpectAmount")
+        amt = int(amt) if amt is not None else o.settlement_actual
+        if (o.settlement_date, o.settle_paid_on, o.settle_recognized_on, o.settlement_actual) == (exp, paid, basis, amt):
+            continue
+        o.settlement_date, o.settle_paid_on, o.settle_recognized_on, o.settlement_actual = exp, paid, basis, amt
+        await o.save(update_fields=["settlement_date", "settle_paid_on", "settle_recognized_on", "settlement_actual", "updated_at"])
+        if paid:
+            await log_event(o, actor, "settled", f"네이버 정산 완료 — {amt:,}원 ({paid})" + run_suffix(run),
+                            {**run_tag(run), "settlement": amt, "settle_paid_on": str(paid), "source": "naver_settle_case"}, run)
+        changed += 1
+    return changed
+
+
 async def apply_coupang_revenue(actor: dict, run, force: bool = False) -> int:
     """구매확정 등으로 매출 인식된 쿠팡 주문의 실제 정산액을 주문 줄에 붙인다. 반환: 바뀐 줄 수."""
     now = datetime.now(timezone.utc)
@@ -501,7 +543,8 @@ async def apply_coupang_revenue(actor: dict, run, force: bool = False) -> int:
     for r in rows:
         for it in r.get("items") or []:
             key = (str(r.get("orderId") or ""), str(it.get("vendorItemId") or ""))
-            s = sums.setdefault(key, {"amount": 0, "date": r.get("settlementDate") or r.get("recognitionDate")})
+            s = sums.setdefault(key, {"amount": 0, "date": r.get("settlementDate") or r.get("recognitionDate"),
+                                      "recognized": r.get("recognitionDate"), "final": r.get("finalSettlementDate")})
             s["amount"] += _units(it.get("settlementAmount"))
     changed = 0
     for (order_no, item_id), s in sums.items():
@@ -509,15 +552,17 @@ async def apply_coupang_revenue(actor: dict, run, force: bool = False) -> int:
         if item_id:
             qs = qs.filter(market_option_id=item_id)
         for o in await qs:
-            if o.settlement_actual == s["amount"]:
+            rec, fin = _d(s.get("recognized")), _d(s.get("final"))
+            if o.settlement_actual == s["amount"] and o.settle_recognized_on == rec and o.settle_final_on == fin:
                 continue
             before = o.settlement_actual
             o.settlement_actual = s["amount"]
-            try:
-                o.settlement_date = datetime.fromisoformat(str(s["date"])[:10]).date() if s["date"] else o.settlement_date
-            except ValueError:
-                pass
-            await o.save(update_fields=["settlement_actual", "settlement_date", "updated_at"])
+            o.settlement_date = _d(s["date"]) or o.settlement_date
+            o.settle_recognized_on = rec or o.settle_recognized_on
+            o.settle_final_on = fin or o.settle_final_on
+            await o.save(update_fields=["settlement_actual", "settlement_date", "settle_recognized_on", "settle_final_on", "updated_at"])
+            if before == s["amount"]:
+                continue
             await log_event(o, actor, "settled", f"쿠팡 정산액 확인 — {s['amount']:,}원" + run_suffix(run), {
                 **run_tag(run), "settlement": {"from": before, "to": s["amount"]}, "settlement_date": s["date"], "source": "coupang_revenue_history",
             }, run)
@@ -661,6 +706,10 @@ async def collect_market(market: str, auth: dict | None, trigger: str = "manual"
                     run.changed += 1
             if market == "naver":    # 변경 목록에 배송완료가 빠질 때가 있다 → 안 끝난 주문 다시 읽기
                 run.changed += await refresh_naver_open(actor, run, {ln["line_no"] for ln in lines})
+                try:   # 구매확정 주문의 정산 예정·완료 (실패해도 수집은 성공)
+                    run.changed += await apply_naver_settle(actor, run, force=trigger != "poller")
+                except mc.MarketApiError as e:
+                    logger.warning(f"네이버 정산 실패: run={run.id} {str(e)[:200]}")
             if market == "coupang":   # 송장 올린 뒤 상태(배송중·배송완료)는 발주서 목록 조회에 안 나온다 → 한 건씩
                 run.changed += await refresh_coupang_open(actor, run)
             if market == "coupang":   # 취소·반품 요청은 발주서 목록에 안 나온다 → 따로
@@ -806,7 +855,41 @@ def order_dict(o: MarketOrder) -> dict:
         "last_synced_at": _fmt(o.last_synced_at), "created_at": o.created_at.isoformat(),
         "amount": amount_of(o, json.loads(_dec(o.raw_enc) or "null")),
         "settlement_date": o.settlement_date.isoformat() if o.settlement_date else None,
+        "settle": settle_info(o),
     }
+
+
+def settle_info(o: MarketOrder) -> dict | None:
+    """완료 주문의 정산 단계 (2026-11-11) — 배송완료 → 구매확정 → (쿠팡) 정산 70% → 정산완료.
+    stage: delivered(구매확정 대기) · decided(정산 대기) · paid70(쿠팡 30% 유보 대기) · paid(끝)
+    쿠팡은 매출내역의 지급예정일·유보액 지급예정일이 지났는지로, 네이버는 건별 정산의 완료일로 본다."""
+    if o.stage != "done" or o.is_test:
+        return None
+    today = datetime.now(KST).date()
+    amount = o.settlement_actual
+    out = {"recognized_on": o.settle_recognized_on.isoformat() if o.settle_recognized_on else None,
+           "due_on": o.settlement_date.isoformat() if o.settlement_date else None,
+           "final_on": o.settle_final_on.isoformat() if o.settle_final_on else None,
+           "paid_on": o.settle_paid_on.isoformat() if o.settle_paid_on else None, "amount": amount}
+    if o.market == "coupang":
+        if amount is None:
+            stage = "delivered"
+        elif o.settle_final_on and today >= o.settle_final_on:
+            stage = "paid"
+        elif o.settlement_date and today >= o.settlement_date:
+            stage = "paid70" if o.settle_final_on else "paid"
+        else:
+            stage = "decided"
+    elif o.market == "naver":
+        if o.settle_paid_on:
+            stage = "paid"
+        elif o.market_status == "PURCHASE_DECIDED":
+            stage = "decided"
+        else:
+            stage = "delivered"
+    else:
+        stage = "delivered"
+    return {**out, "stage": stage}
 
 
 def receiver_full(o: MarketOrder) -> dict:
