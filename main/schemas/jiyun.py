@@ -144,3 +144,77 @@ class JiyunUpdate(_Common):
         if v is None or v not in JIYUN_STATUS:
             raise ValueError("집운 상태가 올바르지 않습니다.")
         return v
+
+
+# ---- 집운 묶음 (2026-11-11) — 받는 사람이 같은 주문 여러 건을 집운 한 번에
+class JiyunBundleOrder(BaseModel):
+    order_id: int
+    packages: list[str] = Field(default_factory=list, max_length=PACKAGES_MAX)
+    weight_kg: Optional[Decimal] = Field(default=None, ge=0, le=Decimal("999"), decimal_places=2)   # 이 주문 몫 무게 (비율 계산)
+
+    @field_validator("packages")
+    @classmethod
+    def clean_packages(cls, v):
+        out = [_no_space(x) for x in v]
+        return [x for x in dict.fromkeys(out) if x]
+
+
+class JiyunBundleCreate(_Common):
+    """금액(fee_cny · pay_amount · charged_krw)은 묶음 합계 — 주문별 무게 비율로 나눠 적는다."""
+
+    jiyun_no: str = Field(max_length=60)
+    status: str = "requested"
+    total_weight_kg: Optional[Decimal] = Field(default=None, ge=0, le=Decimal("999"), decimal_places=2)
+    orders: list[JiyunBundleOrder] = Field(min_length=1, max_length=20)
+
+    @field_validator("jiyun_no")
+    @classmethod
+    def no(cls, v):
+        return _jiyun_no(v)
+
+    @field_validator("status")
+    @classmethod
+    def known_status(cls, v):
+        if v not in JIYUN_STATUS:
+            raise ValueError("집운 상태가 올바르지 않습니다.")
+        return v
+
+
+class JiyunBundleUpdate(BaseModel):
+    """한 상자에 같은 값만 — 묶음 전체에 넣는다."""
+
+    status: Optional[str] = None
+    dispatched_at: Optional[datetime] = None
+    hbl: Optional[str] = Field(default=None, max_length=60)
+    kr_courier: Optional[str] = None
+    kr_tracking_no: Optional[str] = Field(default=None, max_length=60)
+    charged_status: Optional[str] = None
+    charged_at: Optional[datetime] = None
+    charged_source: Optional[str] = Field(default=None, max_length=100)
+
+    @field_validator("status")
+    @classmethod
+    def known_status(cls, v):
+        if v is not None and v not in JIYUN_STATUS:
+            raise ValueError("집운 상태가 올바르지 않습니다.")
+        return v
+
+    @field_validator("kr_courier")
+    @classmethod
+    def known_courier(cls, v):
+        v = _blank(v)
+        if v is not None and v not in COURIERS:
+            raise ValueError(f"국내 택배사는 {', '.join(COURIERS)} 중 하나예요.")
+        return v
+
+    @field_validator("hbl", "kr_tracking_no")
+    @classmethod
+    def numbers(cls, v):
+        return _no_space(v)
+
+    @field_validator("charged_status")
+    @classmethod
+    def known_charged(cls, v):
+        if v is not None and v not in CHARGED_STATUS:
+            raise ValueError("청구 확인은 none · approved · settled 중 하나예요.")
+        return v

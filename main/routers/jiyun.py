@@ -7,7 +7,8 @@ from core.auth_deps import require_feature
 from core.jiyun_config import JIYUN_STATUS
 from core.permissions import Feature
 from core.response_utils import success, success_only
-from schemas.jiyun import JiyunCreate, JiyunUpdate
+from schemas.jiyun import JiyunBundleCreate, JiyunBundleUpdate, JiyunCreate, JiyunUpdate
+from services.order import jiyun_bundle_service as bundle
 from services.order.jiyun_service import JiyunService
 
 logger = logging.getLogger(__name__)
@@ -51,6 +52,51 @@ async def create_jiyun(body: JiyunCreate, auth=Depends(require_feature(Feature.O
         raise
     except Exception as e:
         raise _fail("추가", e)
+
+
+# ---- 집운 묶음 (2026-11-11) — /{jiyun_id} 보다 먼저 둬야 한다
+@router.get("/bundle-candidates")
+async def bundle_candidates(include_test: bool = Query(default=False), auth=Depends(require_feature(Feature.ORDER))):
+    try:
+        return success(groups=await bundle.candidates(include_test))
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise _fail("묶음 후보 조회", e)
+
+
+@router.post("/bundle")
+async def create_bundle(body: JiyunBundleCreate, auth=Depends(require_feature(Feature.ORDER))):
+    try:
+        items = await bundle.create_bundle(body, auth)
+        logger.info(f"집운 묶음 추가: {len(items)}건 ids={[j['id'] for j in items]} by={auth['user_id']}")
+        return success(items=items)
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise _fail("묶음 추가", e)
+
+
+@router.get("/{jiyun_id}/bundle")
+async def get_bundle(jiyun_id: int, auth=Depends(require_feature(Feature.ORDER))):
+    try:
+        return success(items=await bundle.get_bundle(jiyun_id))
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise _fail("묶음 조회", e, jiyun_id)
+
+
+@router.patch("/{jiyun_id}/bundle")
+async def update_bundle(jiyun_id: int, body: JiyunBundleUpdate, auth=Depends(require_feature(Feature.ORDER))):
+    try:
+        items = await bundle.update_bundle(jiyun_id, body, auth)
+        logger.info(f"집운 묶음 수정: jiyun_id={jiyun_id} {len(items)}건 fields={sorted(body.model_fields_set)} by={auth['user_id']}")
+        return success(items=items)
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise _fail("묶음 수정", e, jiyun_id)
 
 
 @router.get("/{jiyun_id}")
