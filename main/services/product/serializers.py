@@ -25,6 +25,8 @@ def product_dict(p) -> dict:
         "allergens": p.allergens,
         "shelf_life": p.shelf_life,
         "storage": p.storage,
+        "label_images": p.label_images or [],
+        "nutrition": p.nutrition,
         "category": p.category,
         "subcategory": p.subcategory,
         "tea_form": p.tea_form,

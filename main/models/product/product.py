@@ -18,6 +18,9 @@ class Product(BaseModel):
     allergens = fields.CharField(max_length=300, null=True)       # 알레르기 유발 성분 (예: 우유, 대두)
     shelf_life = fields.CharField(max_length=100, null=True)      # 소비기한 (예: 12개월)
     storage = fields.CharField(max_length=300, null=True)         # 보관 방법
+    # 수입신고용 성분 자료 — 신고 때 상품에 있으면 그대로 쓰고, 없으면 찾아서 여기에 저장한다 (2026-11-14)
+    label_images = fields.JSONField(null=True)                    # 성분표·영양성분표 이미지 주소 목록 (최대 10장)
+    nutrition = fields.TextField(null=True)                       # 영양성분 글 (예: 100ml당 열량 25kcal, 당류 6g …)
     # 분류 — 값 목록은 utils/category.py (2026-10-29)
     category = fields.CharField(max_length=20, default="beverage")  # 대분류 beverage(음료) · tea(차, 우려 마시는)
     subcategory = fields.CharField(max_length=20, null=True)      # 소분류 — 대분류마다 정해진 값

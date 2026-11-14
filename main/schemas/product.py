@@ -21,6 +21,8 @@ class ProductCreate(BaseModel):
     allergens: Optional[str] = Field(default=None, max_length=300)
     shelf_life: Optional[str] = Field(default=None, max_length=100)
     storage: Optional[str] = Field(default=None, max_length=300)
+    label_images: Optional[list[str]] = None  # 성분표·영양성분표 이미지 (보내면 목록 전체 교체), 최대 PHOTOS_MAX
+    nutrition: Optional[str] = Field(default=None, max_length=5000)  # 영양성분 글
     # 분류 (utils/category.py) — 소분류는 대분류와 같이 보낸다
     category: Optional[str] = Field(default=None, max_length=20)
     subcategory: Optional[str] = Field(default=None, max_length=20)
@@ -33,7 +35,7 @@ class ProductCreate(BaseModel):
         check_category(self.category, self.subcategory, self.tea_form)
         return self
 
-    @field_validator("manufacturer", "ingredients", "allergens", "shelf_life", "storage")
+    @field_validator("manufacturer", "ingredients", "allergens", "shelf_life", "storage", "nutrition")
     @classmethod
     def validate_info(cls, v):
         return clean_str(v)
@@ -57,7 +59,7 @@ class ProductCreate(BaseModel):
         return check_photo_url(v)
 
 
-    @field_validator("photos")
+    @field_validator("photos", "label_images")
     @classmethod
     def validate_photos(cls, v):
         return check_photos(v)
@@ -77,6 +79,8 @@ class ProductUpdate(BaseModel):
     allergens: Optional[str] = Field(default=None, max_length=300)
     shelf_life: Optional[str] = Field(default=None, max_length=100)
     storage: Optional[str] = Field(default=None, max_length=300)
+    label_images: Optional[list[str]] = None  # 성분표·영양성분표 이미지 (보내면 목록 전체 교체), 최대 PHOTOS_MAX
+    nutrition: Optional[str] = Field(default=None, max_length=5000)  # 영양성분 글
     # 분류 (utils/category.py) — 소분류는 대분류와 같이 보낸다
     category: Optional[str] = Field(default=None, max_length=20)
     subcategory: Optional[str] = Field(default=None, max_length=20)
@@ -89,7 +93,7 @@ class ProductUpdate(BaseModel):
         check_category(self.category, self.subcategory, self.tea_form)
         return self
 
-    @field_validator("manufacturer", "ingredients", "allergens", "shelf_life", "storage")
+    @field_validator("manufacturer", "ingredients", "allergens", "shelf_life", "storage", "nutrition")
     @classmethod
     def validate_info(cls, v):
         return clean_str(v)
@@ -112,7 +116,7 @@ class ProductUpdate(BaseModel):
     def validate_photo_url(cls, v):
         return check_photo_url(v)
 
-    @field_validator("photos")
+    @field_validator("photos", "label_images")
     @classmethod
     def validate_photos(cls, v):
         return check_photos(v)
