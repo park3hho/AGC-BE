@@ -23,6 +23,7 @@ from routers import (
     jiyun,
     domestic,
     thumb,
+    shop_analytics,
     auth,
     detail_page,
     exchange_rate,
@@ -85,6 +86,7 @@ app.include_router(order.router)
 app.include_router(taobao_purchase.router)
 app.include_router(jiyun.router)
 app.include_router(domestic.router)
+app.include_router(shop_analytics.router)   # 자사몰 분석 (2026-11-15)
 app.include_router(thumb.router)   # 목록용 작은 사진 (2026-11-09)
 app.include_router(listing.router)
 app.include_router(competitor.router)
