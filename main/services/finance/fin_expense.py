@@ -34,6 +34,13 @@ _lock = asyncio.Lock()
 
 METHOD = {"card": "현대카드", "alipay": "알리페이(현대카드)", "kakaopay": "기타", "other": "기타"}
 METHOD_NOTE = {"kakaopay": "카카오페이", "other": "기타(위챗페이·위안 등)"}
+
+
+def _method(x) -> str:
+    """알리페이라도 잔액(账户余额)으로 낸 건 "알리페이 잔액" — charged_source 에 "잔액"이 있으면 (2026-11-15, 매번 현대카드로 덮어써지던 문제)."""
+    if x.pay_method == "alipay" and "잔액" in (getattr(x, "charged_source", None) or ""):
+        return "알리페이 잔액"
+    return METHOD.get(x.pay_method or "", "기타")
 MARKET_PAYEE = {"naver": "네이버 스마트스토어", "coupang": "쿠팡", "shop": "결제대행(자사몰)"}
 
 
@@ -108,7 +115,7 @@ async def build_rows() -> tuple[dict[str, dict], set[str]]:
             "spent_on": _day(when), "amount": amount, "amount_confirmed": confirmed,
             "payee": f"타오바오 {p.shop_name}" if p.shop_name else "타오바오",
             "purpose": f"{code} 고객 주문 상품 구매 ({o.product_name[:60] if o else ''})".strip(),
-            "category": "상품 매입", "method": METHOD.get(p.pay_method or "", "기타"),
+            "category": "상품 매입", "method": _method(p),
             "evidence": "해외 영수증" if doc else "없음",
             "source_ref": f"AGC 구매기록 {p.id}" + (f" · 타오바오 {p.taobao_order_no}" if p.taobao_order_no else ""),
             "ext_key": key, "recorded_by": RECORDED_BY, "memo": " · ".join(x for x in memo if x),
@@ -146,7 +153,7 @@ async def build_rows() -> tuple[dict[str, dict], set[str]]:
         row = {
             "spent_on": _day(when), "amount": amount, "amount_confirmed": confirmed,
             "payee": "타오바오 집운(集运)", "purpose": f"{code} 국제 배송비 (집운 {j.jiyun_no})",
-            "category": "배송·운반", "method": METHOD.get(j.pay_method or "", "기타"),
+            "category": "배송·운반", "method": _method(j),
             "evidence": "해외 영수증" if doc else "없음",
             "source_ref": f"AGC 집운 기록 {j.id} · {j.jiyun_no}", "ext_key": key, "recorded_by": RECORDED_BY,
             "memo": " · ".join(x for x in [METHOD_NOTE.get(j.pay_method), f"무게 {_num(j.weight_kg)}kg" if j.weight_kg else None,
