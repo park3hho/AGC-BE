@@ -25,6 +25,33 @@ def _parse(code: Optional[str]):
     return m.group(1).upper(), (int(m.group(2)) if m.group(2) else None), (int(m.group(3)) if m.group(3) else 1)
 
 
+async def _market_url(o: MarketOrder, product_id: int) -> Optional[str]:
+    """우리 마켓 상품 페이지 — 마켓 등록 기록(MarketListing.url)에서. 네이버: 원상품번호(memo originProductNo)로,
+    쿠팡: 판매자상품 id 로 찾고 vendorItemId 는 이 주문 옵션으로 바꾼다. 못 찾으면 그 제품의 같은 마켓 첫 페이지."""
+    rows = await MarketListing.filter(platform=o.market, product_id=product_id, deleted_at=None)
+    if o.market == "shop":
+        return f"https://www.eidofood.com/products/{(o.market_product_id or '').strip()}" if o.market_product_id else None
+    pick = None
+    for r in rows:
+        if o.market == "naver" and o.market_product_id and f"originProductNo {o.market_product_id}" in (r.memo or ""):
+            pick = r
+        elif o.market == "coupang" and o.market_product_id and r.market_product_id == o.market_product_id:
+            pick = r
+        if pick:
+            break
+    pick = pick or next((r for r in rows if r.url), None)
+    url = pick.url if pick else None
+    if url and o.market == "coupang" and o.market_option_id and "vendorItemId=" in url:
+        url = url.split("vendorItemId=")[0] + f"vendorItemId={o.market_option_id}"
+    return url
+
+
+async def _purchase_url(o: MarketOrder) -> Optional[str]:
+    from models.order.purchase import TaobaoPurchase
+    p = await TaobaoPurchase.filter(order_id=o.id, deleted_at=None).exclude(item_url=None).exclude(item_url="").order_by("-id").first()
+    return p.item_url if p else None
+
+
 async def order_sourcing(o: MarketOrder) -> Optional[dict]:
     product_code = option_id = None
     bundle, matched_by = 1, None
@@ -63,6 +90,10 @@ async def order_sourcing(o: MarketOrder) -> Optional[dict]:
         )
     return {
         "product_id": product.id, "product_code": product.code, "product_title": product.title_ko,
+        # 주문 상세 '상품 상세' 섹션 (2026-11-16) — 사진 · 우리 마켓 상품 페이지 · 실제로 산 타오바오 상품
+        "photo_url": product.photo_url,
+        "market_url": await _market_url(o, product.id),
+        "purchase_url": await _purchase_url(o),
         "taobao_url": survey.taobao_url if survey else None,
         "option_id": opt.id if opt else None,
         "option1": opt.option1 if opt else None, "option2": opt.option2 if opt else None,
