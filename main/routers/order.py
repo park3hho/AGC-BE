@@ -140,7 +140,7 @@ async def confirm_order(order_id: int, auth=Depends(require_feature(Feature.ORDE
         raise _fail("발주확인", e)
 
 class BundleBody(BaseModel):
-    key: Optional[str] = Field(default=None, max_length=30)   # 없음 = 따로 보내기
+    key: Optional[str] = Field(default=None, max_length=30)   # 없음 = 따로 보내기 · 묶음 code(PRE_LP…) 또는 주문 코드
 
 
 @router.patch("/{order_id}/bundle")

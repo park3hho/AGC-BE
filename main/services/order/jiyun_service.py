@@ -6,6 +6,15 @@ data 에 단계(국제 발송) · 관련 번호(집운 번호 · H B/L · 국내
 
 import logging
 from services.finance import fin_expense
+
+
+async def _bundle_sync(order_id: int) -> None:
+    """집운 기록이 바뀌면 그 주문의 묶음 상태(결제 · LP 번호 · 출고)를 다시 (2026-11-16)."""
+    try:
+        from services.order.bundle_service import recompute_for_order
+        await recompute_for_order(order_id)
+    except Exception:
+        pass
 from datetime import datetime, timezone
 from decimal import Decimal
 
@@ -188,6 +197,7 @@ class JiyunService:
              "values": {k: v for k, v in snap.items() if v not in (None, [], "")}},
         )
         fin_expense.kick()   # FIN 지출 원장으로 (2026-10-30)
+        await _bundle_sync(j.order_id)
         await _sync_domestic(j, auth)   # 국내 송장 → 국내 배송 기록 (2026-11-03)
         return await jiyun_dict(j)
 
@@ -221,6 +231,7 @@ class JiyunService:
                  "refs": _refs(j), "changes": changes},
             )
         fin_expense.kick()   # FIN 지출 원장으로 (2026-10-30)
+        await _bundle_sync(j.order_id)
         await _sync_domestic(j, auth)   # 국내 송장 → 국내 배송 기록 (2026-11-03)
         return await jiyun_dict(j)
 
@@ -233,6 +244,7 @@ class JiyunService:
         j.deleted_at = datetime.now(timezone.utc)
         await j.save(update_fields=["deleted_at", "updated_at"])
         fin_expense.kick()
+        await _bundle_sync(j.order_id)
         order = await MarketOrder.get(id=j.order_id)
         await log_event(order, actor, "jiyun_deleted", f"집운 {j.jiyun_no} 기록 삭제",
                         {"jiyun_id": j.id, "values": _snapshot(j)})

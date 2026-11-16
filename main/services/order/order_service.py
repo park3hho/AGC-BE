@@ -316,8 +316,10 @@ async def assign_bundle(o: MarketOrder) -> str | None:
     """집운 묶음 정하기 (2026-11-11) — 주문이 들어오자마자.
     같은 받는 사람(이름 + 우편번호)의 진행 중 주문 중 아직 집운을 안 보낸 묶음이 있으면 거기에, 없으면 자기 코드로 새 묶음.
     테스트 주문은 테스트끼리만. 이미 묶음이 있으면 그대로."""
-    if o.bundle_key or not o.code or o.stage in ("done", "cancelled"):
-        return o.bundle_key
+    # 2026-11-16 — 묶음 번호(PRE_LP…)로 바뀜: services/order/bundle_service.assign. 아래 예전 방식은 쓰지 않는다
+    from services.order import bundle_service
+    b = await bundle_service.assign(o)
+    return b.code if b else o.bundle_key
     name, zip_ = _rkey(o)
     key = o.code
     if name and zip_:
@@ -341,6 +343,8 @@ async def bundle_info(keys: set[str]) -> dict[str, dict]:
     out: dict[str, dict] = {}
     if not keys:
         return out
+    from models.order.bundle import JiyunBundle
+    bstat = {b.code: (b.status, b.lp_no) for b in await JiyunBundle.filter(code__in=list(keys))}
     members = await MarketOrder.filter(bundle_key__in=list(keys)).exclude(stage="cancelled").order_by("id")
     by: dict[str, list] = {}
     for m in members:
@@ -353,7 +357,8 @@ async def bundle_info(keys: set[str]) -> dict[str, dict]:
     for k, ms in by.items():
         total = sum(max(1, len(purchases.get(m.id, []))) for m in ms)
         arrived = sum(sum(1 for s in purchases.get(m.id, []) if s == "arrived") for m in ms)
-        out[k] = {"key": k, "size": len(ms), "codes": [m.code for m in ms],
+        out[k] = {"key": k, "code": k, "size": len(ms), "codes": [m.code for m in ms],
+                  "status": bstat.get(k, (None, None))[0], "lp_no": bstat.get(k, (None, None))[1],
                   "arrived": arrived, "total": total, "ready": arrived >= total,
                   "sent": bool(sent.intersection(m.id for m in ms))}
     return out
@@ -426,8 +431,10 @@ async def upsert_line(line: dict, actor: dict, run) -> str:
         await issue_code(o, actor, run)
         try:   # 같은 고객 진행 중 주문과 집운 묶음 (2026-11-11)
             key = await assign_bundle(o)
-            if key and key != o.code:
-                await log_event(o, actor, "bundled", f"집운 묶음 {key} 에 들어감 — 같은 고객 주문과 한 번에 보냄{run_suffix(run)}",
+            if key:
+                n = await MarketOrder.filter(bundle_key=key).exclude(stage="cancelled").count()
+                await log_event(o, actor, "bundled",
+                                f"집운 묶음 {key}" + (f" 에 합류 — 같은 고객 주문 {n}건을 한 번에 보냄" if n > 1 else " 새로 엶") + run_suffix(run),
                                 {**run_tag(run), "bundle_key": key}, run)
         except Exception as e:
             logger.warning(f"집운 묶음 실패: {o.code} {type(e).__name__}")
@@ -831,6 +838,11 @@ async def order_poll_loop() -> None:
             await refresh_domestic()
         except Exception:
             logger.exception("국내 배송 조회 실패")
+        try:   # 집운 묶음 상태 — 취소 반영 · 출고 · 완료 (2026-11-16)
+            from services.order.bundle_service import sync_all as bundle_sync
+            await bundle_sync()
+        except Exception:
+            logger.exception("집운 묶음 다시 계산 실패")
         try:   # FIN 지출 원장 — 바뀐 줄만 · 지난번 실패분 다시 (2026-10-30)
             from services.finance.fin_expense import sync_all
             await sync_all()
@@ -1084,29 +1096,18 @@ class OrderService:
 
     @staticmethod
     async def set_bundle(order_id: int, key: str | None, auth: dict) -> dict:
-        """집운 묶음 바꾸기 (2026-11-11) — key 없음 = 따로 보내기(자기 코드), key = 다른 주문 코드의 묶음에 넣기."""
+        """집운 묶음 바꾸기 — key 없음 = 따로 보내기(새 묶음), key = 묶음 code(PRE_LP…) 또는 그 묶음의 주문 코드 (2026-11-16)."""
+        from services.order import bundle_service
         o = await MarketOrder.get_or_none(id=order_id)
         if not o:
             raise HTTPException(status_code=404, detail="주문을 찾지 못했습니다.")
-        if await JiyunShipment.filter(order_id=o.id, deleted_at=None).exclude(status="cancelled").exists():
-            raise HTTPException(status_code=409, detail="이미 집운을 보낸 주문은 묶음을 바꿀 수 없어요.")
-        new = o.code
-        if key:
-            head = await MarketOrder.get_or_none(code=key.strip())
-            if not head:
-                raise HTTPException(status_code=404, detail=f"주문 {key} 를 찾지 못했어요.")
-            if _rkey(head) != _rkey(o):
-                raise HTTPException(status_code=409, detail="받는 사람이 다른 주문과는 묶을 수 없어요 (통관이 받는 사람 1명 단위).")
-            new = head.bundle_key or head.code
         before = o.bundle_key
-        if before != new:
-            o.bundle_key = new
-            await o.save(update_fields=["bundle_key", "updated_at"])
-            await log_event(o, actor_of(auth), "bundled",
-                            f"집운 묶음 {before or '-'} → {new}" + (" (따로 보내기)" if new == o.code else ""),
-                            {"bundle_key": new, "from": before})
-        return {"order": order_dict(o), "bundle": (await bundle_info({new})).get(new)}
-
+        nb = await bundle_service.move(order_id, key)
+        o = await MarketOrder.get(id=order_id)
+        if before != nb.code:
+            await log_event(o, actor_of(auth), "bundled", f"집운 묶음 {before or '-'} → {nb.code}" + ("" if key else " (따로 보내기)"),
+                            {"bundle_key": nb.code, "from": before})
+        return {"order": order_dict(o), "bundle": (await bundle_info({nb.code})).get(nb.code)}
     @staticmethod
     async def recheck(order_id: int, auth: dict) -> dict:
         o = await MarketOrder.get_or_none(id=order_id)

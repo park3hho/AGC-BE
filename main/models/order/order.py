@@ -43,7 +43,8 @@ class MarketOrder(BaseModel):
     pccc_valid_to = fields.DateField(null=True)                     # 통관부호 유효기간 만료일
     # 집운 묶음 (2026-11-11) — 같은 받는 사람(이름+우편번호)의 진행 중 주문은 들어오자마자 같은 묶음(첫 주문 코드).
     # 묶음의 상자가 전부 창고에 들어와야 '집운 결제' 할 일이 뜬다. 따로 보내려면 자기 코드.
-    bundle_key = fields.CharField(max_length=30, null=True, index=True)
+    bundle_key = fields.CharField(max_length=30, null=True, index=True)   # 집운 묶음 코드 (2026-11-16 부터 JiyunBundle.code = PRE_LP…, 예전 화면 호환)
+    jiyun_bundle = fields.ForeignKeyField("models.JiyunBundle", related_name="orders", null=True, on_delete=fields.SET_NULL)
     receiver_hash = fields.CharField(max_length=64, null=True)      # 통관부호·이름·전화·우편번호 지문 — 바뀌면 다시 검증
 
     raw_enc = fields.TextField(null=True)                           # 마지막으로 받은 마켓 원본 응답 (암호문) — 추적용

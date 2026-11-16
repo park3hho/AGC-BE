@@ -24,6 +24,7 @@ TORTOISE_ORM = {
                 "models.order.domestic",   # 국내 배송 기록 — 국내 송장 · 마켓 발송처리 · 배송 조회 (2026-11-03)
                 "models.order.document",   # 주문 증빙 파일 — 타오바오 영수증 · 집운 결제 내역 · 마켓 정산 내역
                 "models.order.import_decl",   # 수입식품 구매대행 수입신고 (2026-11-11)
+                "models.order.bundle",   # 집운 묶음 PRE_LP… — 받는 사람별 한 상자, 결제하면 LP 번호 (2026-11-16)
                 "aerich.models",
             ],
             "default_connection": "default",

@@ -10,6 +10,7 @@ class JiyunShipment(BaseModel):
     바꿀 때마다 그 고객 주문의 추적 기록(OrderEvent jiyun_*)에 이전값 → 새값으로 남는다."""
 
     order = fields.ForeignKeyField("models.MarketOrder", related_name="jiyun_shipments", on_delete=fields.RESTRICT)
+    bundle = fields.ForeignKeyField("models.JiyunBundle", related_name="shipments", null=True, on_delete=fields.SET_NULL)   # 집운 묶음 (2026-11-16)
     jiyun_no = fields.CharField(max_length=60)                       # 집운 배송 요청 번호 (物流订单号) — 살아 있는 것끼리 겹치지 않게
     status = fields.CharField(max_length=20, default="requested")     # core/jiyun_config.JIYUN_STATUS
     packages = fields.JSONField(default=list)                        # 묶인 소포 — 중국 운송장 번호들
