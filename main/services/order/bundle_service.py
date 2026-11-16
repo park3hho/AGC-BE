@@ -39,11 +39,28 @@ def _base_no(no: str | None) -> str:
     return re.sub(r"-\d{1,2}$", "", (no or "").strip())
 
 
+DIGITS36 = string.digits + string.ascii_uppercase        # 0-9 → A-Z 순서 (36진수)
+
+
+def _b36(n: int, width: int = 10) -> str:
+    s = ""
+    while n:
+        n, r = divmod(n, 36)
+        s = DIGITS36[r] + s
+    return s.rjust(width, "0")
+
+
 async def new_code() -> str:
-    while True:
-        code = "PRE_LP" + "".join(secrets.choice(ALPHABET) for _ in range(10))
-        if not await JiyunBundle.exists(code=code):
-            return code
+    """PRE_LP + 36진수 10자리 일련번호, 0000000000 부터 차례로 (2026-11-17 사용자: "0부터 시작해야해")."""
+    last = 0 - 1
+    for c in await JiyunBundle.filter(code__startswith="PRE_LP").values_list("code", flat=True):
+        suf = c[6:]
+        if len(suf) == 10 and all(ch in DIGITS36 for ch in suf):
+            last = max(last, int(suf, 36))
+    n = last + 1
+    while await JiyunBundle.exists(code="PRE_LP" + _b36(n)):
+        n += 1
+    return "PRE_LP" + _b36(n)
 
 
 async def order_weight_g(o: MarketOrder) -> int | None:
