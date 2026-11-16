@@ -971,6 +971,62 @@ def settle_info(o: MarketOrder) -> dict | None:
     return {**out, "stage": stage}
 
 
+# 자동 구매확정 예정일 (2026-11-16 사용자: "구매확정 대기 중 상태는 언제쯤 자동 구매확정되는지 일자")
+#   네이버: 배송완료일 + 8일 (구매자가 연장하면 1회 10일씩 최대 3회 — API 에 연장 정보가 없어 반영 못 함, 화면에 안내)
+#   쿠팡: 배송완료일 + 7일 (주말·공휴일 포함)
+#   배송완료일: 마켓 원본(deliveredDate) > 국내 배송 기록 택배 조회 배송완료 > 마켓 상태가 배송완료로 바뀐 걸 수집한 시각
+AUTO_DECIDE_DAYS = {"naver": 8, "coupang": 7}
+DELIVERED_STATUS = {"naver": "DELIVERED", "coupang": "FINAL_DELIVERY"}
+
+
+def _raw_delivered(o: MarketOrder) -> datetime | None:
+    raw = json.loads(_dec(o.raw_enc) or "{}")
+    if o.market == "naver":
+        return _dt((raw.get("delivery") or {}).get("deliveredDate"))
+    return _dt(raw.get("deliveredDate") or (raw.get("orderItems") or [{}])[0].get("deliveredDate"))
+
+
+async def auto_decide_of(orders: list) -> dict[int, dict]:
+    """완료 주문의 자동 구매확정 {state, delivered_on, due_on, d_day, source, decided_on}.
+    state: waiting(예정) · overdue(예정일 지남) · decided(확정됨) · unknown(배송완료일 모름)."""
+    from models.order.domestic import DomesticShipment
+    rows = [o for o in orders if o.stage == "done" and o.market in AUTO_DECIDE_DAYS and not o.is_test]
+    if not rows:
+        return {}
+    by_id = {o.id: o for o in rows}
+    track: dict[int, datetime] = {}
+    for d in await DomesticShipment.filter(order_id__in=list(by_id), deleted_at=None).exclude(delivered_at=None):
+        if d.order_id not in track or d.delivered_at < track[d.order_id]:
+            track[d.order_id] = d.delivered_at
+    seen: dict[int, datetime] = {}
+    for e in await OrderEvent.filter(order_id__in=list(by_id), kind="changed").order_by("created_at"):
+        to = (((e.data or {}).get("diff") or {}).get("market_status") or [None, None])[1]
+        o = by_id[e.order_id]
+        if to in (DELIVERED_STATUS[o.market], "PURCHASE_DECIDED") and e.order_id not in seen:
+            seen[e.order_id] = e.created_at
+    today = datetime.now(KST).date()
+    out = {}
+    for o in rows:
+        decided_on = o.settle_recognized_on
+        if decided_on or o.market_status == "PURCHASE_DECIDED" or (settle_info(o) or {}).get("stage") not in (None, "delivered"):
+            out[o.id] = {"state": "decided", "decided_on": decided_on.isoformat() if decided_on else None}
+            continue
+        when, source = _raw_delivered(o), "마켓"
+        if not when and o.id in track:
+            when, source = track[o.id], "택배 조회"
+        if not when and o.id in seen:
+            when, source = seen[o.id], "수집 시각"
+        if not when:
+            out[o.id] = {"state": "unknown"}
+            continue
+        delivered = when.astimezone(KST).date()
+        due = delivered + timedelta(days=AUTO_DECIDE_DAYS[o.market])
+        d_day = (due - today).days
+        out[o.id] = {"state": "overdue" if d_day < 0 else "waiting", "delivered_on": delivered.isoformat(),
+                     "due_on": due.isoformat(), "d_day": d_day, "source": source, "extendable": o.market == "naver"}
+    return out
+
+
 def receiver_full(o: MarketOrder) -> dict:
     """주문 상세 전용 — 타오바오 주문·배송에 쓸 수취인 원본. 목록에는 넣지 않는다.
     customs_phone(통관용) · contact_phone(쇼핑몰 연락처) 은 덮어쓰지 않고 따로 준다."""
@@ -1008,7 +1064,8 @@ class OrderService:
         counts = {s: await base.filter(pccc_status=s).count() for s in ("ok", "mismatch", "missing", "error", "pending")}
         runs = {m: run_dict(await OrderSyncRun.filter(market=m).order_by("-id").first()) for m in MARKETS}
         prog = await progress_of([o.id for o in rows])
-        items = [{**order_dict(o), "progress": prog.get(o.id)} for o in rows]
+        ad = await auto_decide_of(rows)
+        items = [{**order_dict(o), "progress": prog.get(o.id), "auto_decide": ad.get(o.id)} for o in rows]
         return {"items": items, "total": total, "page": page, "size": size,
                 "pccc_counts": counts, "last_runs": runs, "poll_minutes": POLL_MINUTES}
 
@@ -1021,7 +1078,7 @@ class OrderService:
         raw = json.loads(_dec(o.raw_enc) or "null")
         from services.order.sourcing import order_sourcing   # 순환 import 방지
         prog = (await progress_of([o.id])).get(o.id)   # 상세에서도 집운 묶음 판정 (2026-11-11)
-        return {"order": {**order_dict(o), "progress": prog}, "events": [event_dict(e) for e in events], "raw_masked": mask_raw(raw),
+        return {"order": {**order_dict(o), "progress": prog, "auto_decide": (await auto_decide_of([o])).get(o.id)}, "events": [event_dict(e) for e in events], "raw_masked": mask_raw(raw),
                 "receiver_full": receiver_full(o),
                 "sourcing": await order_sourcing(o)}   # 타오바오에서 살 것 (조사 옵션 × 묶음 수)
 
