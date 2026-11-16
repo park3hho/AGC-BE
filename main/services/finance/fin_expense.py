@@ -111,11 +111,14 @@ async def build_rows() -> tuple[dict[str, dict], set[str]]:
                 f"결제창 {p.pay_currency} {_num(p.pay_amount)}" if p.pay_amount and p.pay_currency != "CNY" else None,
                 "청구 확정" if p.charged_status == "settled" else ("승인 금액" if p.charged_status == "approved" else "환율 추정")]
         doc = docs.get(("purchase", p.id))
+        test = bool(o and o.is_test)      # 시험 구매 (2026-11-16) — 고객 주문 아님 → 상품 매입 › 샘플
         row = {
             "spent_on": _day(when), "amount": amount, "amount_confirmed": confirmed,
             "payee": f"타오바오 {p.shop_name}" if p.shop_name else "타오바오",
-            "purpose": f"{code} 고객 주문 상품 구매 ({o.product_name[:60] if o else ''})".strip(),
+            "purpose": (f"[시험 · 고객 주문 아님] {code} {o.product_name[:60]}" if test
+                        else f"{code} 고객 주문 상품 구매 ({o.product_name[:60] if o else ''})").strip(),
             "category": "상품 매입", "method": _method(p),
+            **({"subcategory": "샘플"} if test else {}),
             "evidence": "해외 영수증" if doc else "없음",
             "source_ref": f"AGC 구매기록 {p.id}" + (f" · 타오바오 {p.taobao_order_no}" if p.taobao_order_no else ""),
             "ext_key": key, "recorded_by": RECORDED_BY, "memo": " · ".join(x for x in memo if x),
