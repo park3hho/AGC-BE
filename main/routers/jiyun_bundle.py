@@ -15,6 +15,12 @@ router = APIRouter(prefix="/jiyun-bundles", tags=["JiyunBundle"])
 # 집운 묶음 PRE_LP… (2026-11-16) — services/order/bundle_service.py
 
 
+class PatchBody(BaseModel):
+    lp_no: Optional[str] = Field(default=None, max_length=60)
+    jiyun_trade_id: Optional[str] = Field(default=None, max_length=60)
+    memo: Optional[str] = Field(default=None, max_length=2000)
+
+
 class MoveBody(BaseModel):
     order_id: int
     target: Optional[str] = Field(default=None, max_length=30)   # 묶음 code · 주문 코드 · 없음 = 따로(새 묶음)
@@ -34,6 +40,30 @@ async def list_bundles(status: Optional[str] = Query(default="active"), include_
         raise
     except Exception as e:
         raise _fail("목록", e)
+
+
+@router.get("/by-order/{order_code}")
+async def bundle_by_order(order_code: str, auth=Depends(require_feature(Feature.ORDER))):
+    """주문 코드(OR-…)로 그 주문의 묶음."""
+    try:
+        return success(bundle=await bundle_service.by_order(order_code))
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise _fail("조회", e)
+
+
+@router.patch("/{code}")
+async def patch_bundle(code: str, body: PatchBody, auth=Depends(require_feature(Feature.ORDER))):
+    """LP 번호 · 집운 결제 주문번호 · 메모 (보낸 칸만)."""
+    try:
+        data = await bundle_service.update_fields(code, body.model_dump(exclude_unset=True))
+        logger.info(f"집운 묶음 수정: {code} {list(body.model_dump(exclude_unset=True))} by={auth['user_id']}")
+        return success(bundle=data)
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise _fail("수정", e)
 
 
 @router.get("/{code}")

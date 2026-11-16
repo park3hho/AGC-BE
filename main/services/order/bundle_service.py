@@ -219,6 +219,25 @@ async def set_status(code: str, confirm: bool) -> dict:
     return await bundle_dict(b, detail=True)
 
 
+async def update_fields(code: str, data: dict) -> dict:
+    """에이전트용 — LP 번호 · 집운 결제 주문번호(tradeId) · 메모 고치기. 바꾼 뒤 상태 다시 계산."""
+    b = await JiyunBundle.get_or_none(code=code.strip().upper())
+    if not b:
+        raise HTTPException(status_code=404, detail="집운 묶음을 찾지 못했어요.")
+    for k in ("lp_no", "jiyun_trade_id", "memo"):
+        if k in data:
+            setattr(b, k, (data[k] or "").strip() or None)
+    await b.save()
+    return await bundle_dict(await recompute(b), detail=True)
+
+
+async def by_order(order_code: str) -> dict:
+    o = await MarketOrder.get_or_none(code=order_code.strip().upper())
+    if not o or not o.jiyun_bundle_id:
+        raise HTTPException(status_code=404, detail="그 주문의 집운 묶음이 없어요.")
+    return await bundle_dict(await JiyunBundle.get(id=o.jiyun_bundle_id), detail=True)
+
+
 async def move(order_id: int, target: str | None) -> JiyunBundle:
     """주문을 다른 묶음으로 (target = 묶음 code PRE_LP… 또는 그 묶음의 주문 코드 OR-…) · 없으면 따로(새 묶음)."""
     o = await MarketOrder.get_or_none(id=order_id)
