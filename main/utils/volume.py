@@ -26,6 +26,34 @@ _TIMES = re.compile(r"^\s*[×✕xX*＊]\s*(\d+)")
 # 괄호 안 박스 수 "(2박스)" — 묶음이면 같이 N배
 _BOX = re.compile(r"([(（]\s*)(\d+)(\s*(?:박스|상자|箱|box)\s*[)）])", re.IGNORECASE)
 _COUNT_UNIT = re.compile(r"(\d+)\s*(팩|개|병|캔|입|박스|盒|瓶|罐|支|袋|听|箱)")
+# 상자 크기 "상자 약 50×30×30cm" · "50x30x30cm" — 부피 무게용 (2026-11-17)
+_BOX_CM = re.compile(
+    r"(\d+(?:\.\d+)?)\s*[×✕xX*＊]\s*(\d+(?:\.\d+)?)\s*[×✕xX*＊]\s*(\d+(?:\.\d+)?)\s*(?:cm|센티|厘米)",
+    re.IGNORECASE,
+)
+
+
+def parse_box_cm(text: Optional[str]) -> Optional[tuple]:
+    """옵션 이름의 상자 크기(cm) — parse_box_cm("70g×9봉 (상자 약 50×30×30cm)") → (50, 30, 30). 없으면 None."""
+    if not text:
+        return None
+    m = _BOX_CM.search(text)
+    if not m:
+        return None
+    dims = tuple(Decimal(g) for g in m.groups())
+    return dims if all(d > 0 for d in dims) else None
+
+
+# "3박스 묶음 시 상자 약 …" · "(8갑 묶음 …, 상자 약 …)" — 적힌 상자가 조사 옵션 N개 분량일 때의 N
+_BOX_PER = re.compile(r"(\d+)\s*(?:박스|세트|갑|봉|통|개|캔|병|팩)?\s*묶음")
+
+
+def parse_box_per(text: Optional[str]) -> int:
+    """상자 크기가 몇 개 분량인지 — "(3박스 묶음 시 상자 약 35×25×25cm)" → 3. 묶음 문구가 없으면 1 (옵션 1개의 상자)."""
+    if not text:
+        return 1
+    m = _BOX_PER.search(text)
+    return max(1, int(m.group(1))) if m else 1
 
 _ML_PER_UNIT = {
     "ml": 1, "毫升": 1, "l": 1000, "리터": 1000, "升": 1000,

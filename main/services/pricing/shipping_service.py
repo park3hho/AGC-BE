@@ -39,7 +39,7 @@ from services.pricing.exchange_rate_service import ExchangeRateService
 from services.product.price_survey_service import alive_surveys
 from services.product.product_service import alive_products
 from services.product.serializers import money_cny, product_dict
-from utils.volume import parse_volume_ml, scale_pack
+from utils.volume import parse_box_cm, parse_box_per, parse_volume_ml, scale_pack
 
 
 def _kg(v: Decimal) -> str:
@@ -72,10 +72,23 @@ def min_box_dim_g(n: int = 1) -> int:
     return int(Decimal(a * b * c * n) * 1000 / VOLUMETRIC_DIVISOR)
 
 
-def _weights(volume: Optional[int], n: int, category: str) -> tuple[Optional[int], Optional[int], Optional[int]]:
+def box_dim_weight_g(box_cm: tuple, n: int = 1, per: int = 1) -> int:
+    """옵션에 적힌 상자(가로×세로×높이 cm)의 부피 무게(g)를 조사 옵션 n개 분량으로.
+    per = 그 상자가 조사 옵션 몇 개 분량인지 ("3박스 묶음 시 상자 약 …" → 3)."""
+    a, b, c = box_cm
+    return int(Decimal(str(a)) * Decimal(str(b)) * Decimal(str(c)) * n * 1000 / VOLUMETRIC_DIVISOR / max(1, per))
+
+
+def _weights(volume: Optional[int], n: int, category: str,
+             box_cm: Optional[tuple] = None, box_per: int = 1) -> tuple[Optional[int], Optional[int], Optional[int]]:
     """(실제 무게, 부피 무게, 계산에 쓸 무게) g. 음료는 실제 무게만. 차는 둘 중 큰 값 — 용량을 못 읽어도 부피 무게로 잡는다.
-    음료도 용량을 못 읽으면 최소 상자(세 변 합 50cm, core/shipping_config.MIN_BOX_CM) 부피 무게로 잡는다 (2026-10-30)."""
+    음료도 용량을 못 읽으면 최소 상자(세 변 합 50cm, core/shipping_config.MIN_BOX_CM) 부피 무게로 잡는다 (2026-10-30).
+    옵션 이름에 상자 크기("상자 약 50×30×30cm")가 있으면 그 부피 무게와 실제 무게 중 큰 값 — 과자처럼 가볍고 큰 상품 (2026-11-17 사용자).
+    묶음 N개는 상자도 N개로 본다. "3박스 묶음 시 상자 약 …" 처럼 상자가 여러 개 분량이면 그만큼 나눈다 (box_per)."""
     actual = volume * n * G_PER_ML + BOX_WEIGHT_G if volume is not None else None
+    if box_cm:
+        dim = box_dim_weight_g(box_cm, n, box_per)
+        return actual, dim, max(actual or 0, dim)
     if category != "tea" and actual is None:
         dim = min_box_dim_g(n)
         return None, dim, dim
@@ -88,16 +101,17 @@ def _weights(volume: Optional[int], n: int, category: str) -> tuple[Optional[int
 def option_shipping(option1: str, option2: Optional[str], category: str = "beverage") -> dict:
     """옵션 1개의 배송비. 용량을 못 읽으면 값이 전부 null (배송비 계산 불가) — 차는 부피 무게로 계산한다."""
     volume = parse_volume_ml(option1, option2)
-    actual, dim, weight = _weights(volume, 1, category)
+    box_text = option2 if parse_box_cm(option2) else option1
+    actual, dim, weight = _weights(volume, 1, category, parse_box_cm(box_text), parse_box_per(box_text))
     if weight is None:
         return {"volume_ml": None, "weight_g": None, "dim_weight_g": None, "billable_kg": None,
                 "shipping_cny": None, "over_limit": False}
     billable = billable_kg(weight)
     return {
-        "box_assumed": volume is None and category != "tea",   # 용량을 못 읽어 최소 상자(세 변 합 50cm)로 계산함
+        "box_assumed": volume is None and category != "tea" and dim is not None and not (parse_box_cm(option2) or parse_box_cm(option1)),   # 용량을 못 읽어 최소 상자(세 변 합 50cm)로 계산함
         "volume_ml": volume,
         "weight_g": actual,
-        "dim_weight_g": dim,          # 부피 무게 (차만) — 계산 무게는 실제·부피 중 큰 값
+        "dim_weight_g": dim,          # 부피 무게 (차 · 상자 크기를 적은 옵션) — 계산 무게는 실제·부피 중 큰 값
         "billable_kg": _kg(billable),
         "shipping_cny": money_cny(shipping_cny_for(billable)),
         "over_limit": billable > SHIPPING_MAX_KG,
@@ -125,7 +139,7 @@ def shipping_rule() -> dict:
         "notes": SHIPPING_NOTES,
         "volumetric": {                          # 부피 무게 — 차(tea) 제품만 반영
             "divisor": VOLUMETRIC_DIVISOR,
-            "applies_to": "tea",
+            "applies_to": "tea · 옵션에 상자 크기(cm)를 적은 상품",
             "box_cm": list(TEA_BOX_CM),
             "box_weight_g": dim_weight_g(1),
             "source_url": VOLUMETRIC_SOURCE_URL,
@@ -188,13 +202,15 @@ def bundle_option_dict(o: PriceSurveyOption, n: int, suggested: bool = False, ca
     base.update(market_option1=m1, market_option2=m2, total_count=count,
                 pack_note=f"{unit}×{n}" if n > 1 else None)   # "24캔×2"
     base["over_duty_free"] = price / CNY_PER_USD > DUTY_FREE_USD
-    actual, dim, weight = _weights(volume1, n, category)
+    box_text = o.option2 if parse_box_cm(o.option2) else o.option1
+    box = parse_box_cm(box_text)
+    actual, dim, weight = _weights(volume1, n, category, box, parse_box_per(box_text))
     if weight is None:
         return {**base, "volume_ml": None, "weight_g": None, "dim_weight_g": None, "billable_kg": None,
                 "shipping_cny": None, "over_limit": False}
     billable = billable_kg(weight)
     return {
-        **base, "box_assumed": volume1 is None and category != "tea",
+        **base, "box_assumed": volume1 is None and category != "tea" and not box,
         "volume_ml": volume1 * n if volume1 is not None else None, "weight_g": actual,
         "dim_weight_g": dim, "billable_kg": _kg(billable),
         "shipping_cny": money_cny(shipping_cny_for(billable)), "over_limit": billable > SHIPPING_MAX_KG,

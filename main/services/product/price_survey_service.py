@@ -103,6 +103,16 @@ class PriceSurveyService:
         return await PriceSurveyService.get(s.id)
 
     @staticmethod
+    async def add_option(survey_id: int, body) -> dict:
+        """옵션 1개 추가. 같은 (맛, 용량) 조합이 있으면 409. 다른 옵션은 손대지 않는다."""
+        s = await _get_alive(survey_id)
+        data = body.model_dump()
+        if await PriceSurveyOption.filter(survey_id=s.id, option1=data.get("option1"), option2=data.get("option2")).exists():
+            raise HTTPException(status_code=409, detail=f"같은 옵션이 이미 있습니다: {data.get('option1')} / {data.get('option2') or '-'}")
+        await PriceSurveyOption.create(survey_id=s.id, **data)
+        return await PriceSurveyService.get(s.id)
+
+    @staticmethod
     async def patch_option(survey_id: int, option_id: int, body: PriceSurveyOptionPatch) -> dict:
         """옵션 1개를 제자리에서 수정 — id·price_cny 는 그대로라 저장된 판매가와 마켓 등록 연결이 유지된다."""
         data = body.model_dump(exclude_unset=True)
