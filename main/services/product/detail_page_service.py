@@ -23,7 +23,7 @@ from core.detail_page_config import (
 )
 from core.pricing_config import MARKET_PLATFORMS, Platform
 from models.product.detail_page import DetailPage, DetailPageCommon, DetailPageReview
-from models.product.price_survey import PriceSurveyOption
+from models.product.price_survey import ProductOption
 from models.product.pricing import ProductPricing
 from models.product.product import Product
 from schemas.detail_page import DetailCommonSave, DetailContent, DetailPageApprove, DetailPageSave
@@ -172,12 +172,14 @@ def _uniq(values) -> list:
     return out
 
 
-async def _latest_options(product_id: int) -> list[PriceSurveyOption]:
-    survey = await alive_surveys().filter(product_id=product_id).order_by("-survey_date", "-id").first()
-    return list(await PriceSurveyOption.filter(survey_id=survey.id).order_by("id")) if survey else []
+async def _latest_options(product_id: int) -> list[ProductOption]:
+    """제품 옵션 (지운 것 빼고). 살아 있는 조사가 없으면 빈 목록 (예전 \"최근 조사 옵션\" 과 같은 기준)."""
+    if not await alive_surveys().filter(product_id=product_id).exists():
+        return []
+    return list(await ProductOption.filter(product_id=product_id, deleted_at=None).order_by("sort", "id"))
 
 
-def _photos(p: Product, options: list[PriceSurveyOption]) -> list[dict]:
+def _photos(p: Product, options: list[ProductOption]) -> list[dict]:
     """고를 수 있는 사진 — 대표 사진 + 추가 사진(갤러리) + 최근 조사 옵션별 사진 (같은 파일은 한 번)."""
     photos, seen = [], set()
     for url, label in [(p.photo_url, "대표")] + [
@@ -191,7 +193,7 @@ def _photos(p: Product, options: list[PriceSurveyOption]) -> list[dict]:
     return photos
 
 
-def build_template(p: Product, options: list[PriceSurveyOption]) -> dict:
+def build_template(p: Product, options: list[ProductOption]) -> dict:
     """제품 + 최근 조사 옵션으로 템플릿을 채운다. 사람이 써야 하는 칸은 [[...]] 확인 표시로 남긴다
     (남아 있어도 확인은 되지만 FE 가 경고를 보여준다)."""
     sizes = _uniq(o.option2 for o in options)

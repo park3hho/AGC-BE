@@ -14,7 +14,7 @@ from models.order.order import MarketOrder
 from models.order.purchase import TaobaoPurchase
 from models.product.competitor import CompetitorPrice
 from models.product.listing import MarketListing
-from models.product.price_survey import PriceSurvey, PriceSurveyOption
+from models.product.price_survey import PriceSurvey, ProductOption
 from models.product.pricing import OptionPrice, ProductPricing
 from models.product.product import Product
 from schemas.competitor import CompetitorUpsert
@@ -72,7 +72,7 @@ class CompetitorService:
         for o in ops:
             op_by.setdefault(o.pricing_id, {})[o.option_id] = o.sale_price
         opt_ids = {oid for d in op_by.values() for oid in d}
-        options = {o.id: o for o in await PriceSurveyOption.filter(id__in=list(opt_ids))}
+        options = {o.id: o for o in await ProductOption.filter(id__in=list(opt_ids))}
         # 실제 구매가 — 쿠폰·할인으로 조사가보다 싸게 산 적이 있으면 그 위안을 원가에 쓴다 (옵션별 최근 1건, 1개 주문만)
         actual_cny: dict[int, float] = {}
         purchases = await TaobaoPurchase.filter(deleted_at=None).order_by("purchased_at").values("order_id", "paid_cny")
@@ -84,8 +84,8 @@ class CompetitorService:
             if last.isdigit() and (o.quantity or 1) == 1 and x["paid_cny"]:
                 actual_cny[int(last)] = float(x["paid_cny"])
         sib_actual: dict[tuple, float] = {}
-        for so in await PriceSurveyOption.filter(id__in=list(actual_cny)):
-            sib_actual[(so.survey_id, str(so.price_cny))] = actual_cny[so.id]
+        for so in await ProductOption.filter(id__in=list(actual_cny)):
+            sib_actual[(so.product_id, str(so.price_cny))] = actual_cny[so.id]
         comps = await CompetitorPrice.filter(product_id__in=list(products))
         comp_by: dict[tuple, list[CompetitorPrice]] = {}
         for c in comps:
@@ -114,7 +114,7 @@ class CompetitorService:
                     ship_cny = sh.get("shipping_cny")
                     if ship_cny is None:
                         return {"option_id": oid, "option": f"{o.option1} {o.option2 or ''}".strip(), "our_price": our}
-                    sib = sib_actual.get((o.survey_id, str(o.price_cny)))   # 같은 조사·같은 조사가 형제 옵션(맛만 다름)의 실구매가
+                    sib = sib_actual.get((o.product_id, str(o.price_cny)))   # 같은 제품·같은 조사가 형제 옵션(맛만 다름)의 실구매가
                     buy = actual_cny.get(oid, sib if sib is not None else float(o.price_cny))
                     basis = "actual" if oid in actual_cny else ("sibling" if sib is not None else "survey")
                     cost = (buy + float(ship_cny)) * float(fx) * markup
@@ -148,7 +148,7 @@ class CompetitorService:
     async def upsert(body: CompetitorUpsert) -> dict:
         if not await Product.filter(id=body.product_id).exists():
             raise HTTPException(status_code=404, detail="제품을 찾지 못했습니다.")
-        if body.option_id and not await PriceSurveyOption.filter(id=body.option_id, survey__product_id=body.product_id).exists():
+        if body.option_id and not await ProductOption.filter(id=body.option_id, product_id=body.product_id).exists():
             raise HTTPException(status_code=400, detail="이 제품의 옵션이 아닙니다.")
         at = body.checked_at or datetime.now(timezone.utc)
         c = await CompetitorPrice.get_or_none(product_id=body.product_id, platform=body.platform, option_id=body.option_id)

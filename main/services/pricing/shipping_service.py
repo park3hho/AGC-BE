@@ -34,7 +34,7 @@ from core.shipping_config import (
     VOLUMETRIC_DIVISOR,
     VOLUMETRIC_SOURCE_URL,
 )
-from models.product.price_survey import PriceSurveyOption
+from models.product.price_survey import ProductOption
 from services.pricing.exchange_rate_service import ExchangeRateService
 from services.product.price_survey_service import alive_surveys
 from services.product.product_service import alive_products
@@ -166,7 +166,7 @@ def shipping_brackets() -> list[dict]:
     return rows
 
 
-def option_dict(o: PriceSurveyOption, category: str = "beverage") -> dict:
+def option_dict(o: ProductOption, category: str = "beverage") -> dict:
     """가격 책정 · 배송비 화면 공통 옵션 모양 (옵션 + 배송비). category = 제품 대분류 (차는 부피 무게)."""
     return {
         "id": o.id, "option1": o.option1, "option2": o.option2,
@@ -182,7 +182,7 @@ def bundle_key(option_id: int, n: int) -> str:
     return str(option_id) if n == 1 else f"{option_id}x{n}"
 
 
-def bundle_option_dict(o: PriceSurveyOption, n: int, suggested: bool = False, category: str = "beverage") -> dict:
+def bundle_option_dict(o: ProductOption, n: int, suggested: bool = False, category: str = "beverage") -> dict:
     """조사 옵션 N개 묶음 = 판매 옵션 1개. 원가 N배 · 용량 N배 + 박스 1개로 운임을 다시 계산한다.
     market_option2 = 마켓에 올릴 용량·입수 ("330ml×48캔"), pack_note = "24캔×2" 같은 설명."""
     volume1 = parse_volume_ml(o.option1, o.option2)
@@ -217,7 +217,7 @@ def bundle_option_dict(o: PriceSurveyOption, n: int, suggested: bool = False, ca
     }
 
 
-def suggested_bundle_qty(o: PriceSurveyOption) -> Optional[int]:
+def suggested_bundle_qty(o: ProductOption) -> Optional[int]:
     """이 옵션을 10kg 이상으로 만드는 가장 작은 묶음 수. 이미 10kg 이상 · 용량 모름 · 한도(30kg·면세)를 넘으면 None."""
     volume = parse_volume_ml(o.option1, o.option2)
     if volume is None:
@@ -232,7 +232,7 @@ def suggested_bundle_qty(o: PriceSurveyOption) -> Optional[int]:
     return None
 
 
-def bundle_suggestions(options: list[PriceSurveyOption]) -> list[tuple[PriceSurveyOption, int]]:
+def bundle_suggestions(options: list[ProductOption]) -> list[tuple[ProductOption, int]]:
     """제품의 가장 무거운 옵션(같은 용량이면 맛별로 전부)도 10kg 미만이면 그 옵션들의 묶음을 제안한다."""
     vols = {o.id: parse_volume_ml(o.option1, o.option2) for o in options}
     known = [v for v in vols.values() if v]
@@ -274,10 +274,11 @@ class ShippingService:
             for s in surveys:
                 base_by_product.setdefault(s.product_id, s)
 
-        options_by_survey: dict[int, list] = {s.id: [] for s in base_by_product.values()}
-        if options_by_survey:
-            for o in await PriceSurveyOption.filter(survey_id__in=list(options_by_survey)).order_by("id"):
-                options_by_survey[o.survey_id].append(o)
+        # 옵션 = 제품 옵션 (id 고정, 지운 것 빼고). 살아 있는 조사가 없는 제품은 예전처럼 빈 목록
+        options_by_product: dict[int, list] = {pid: [] for pid in base_by_product}
+        if options_by_product:
+            for o in await ProductOption.filter(product_id__in=list(options_by_product), deleted_at=None).order_by("sort", "id"):
+                options_by_product[o.product_id].append(o)
 
         items = []
         for p in products:
@@ -285,7 +286,7 @@ class ShippingService:
             items.append({
                 "product": product_dict(p),
                 "survey": {"id": s.id, "code": s.code, "survey_date": s.survey_date.isoformat()} if s else None,
-                "options": [option_dict(o, p.category) for o in options_by_survey.get(s.id, [])] if s else [],
+                "options": [option_dict(o, p.category) for o in options_by_product.get(p.id, [])] if s else [],
             })
         return {
             "fx": await ExchangeRateService.current(),

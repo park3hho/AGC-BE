@@ -5,7 +5,7 @@ from tortoise.exceptions import IntegrityError
 from tortoise.expressions import Q
 from tortoise.functions import Count
 
-from models.product.price_survey import PriceSurveyOption
+from models.product.price_survey import PriceSurveyPrice
 from models.product.pricing import ProductPricing
 from models.product.product import Product
 from schemas.product import ProductCreate, ProductUpdate
@@ -40,9 +40,9 @@ async def _list_extras(product_ids: list[int]) -> dict[int, dict]:
     from services.pricing.shipping_service import option_shipping   # 순환 import 방지
     cats = {r["id"]: r["category"] for r in await Product.filter(id__in=product_ids).values("id", "category")}
     sid_pid = {s["id"]: pid for pid, s in latest.items()}
-    for o in await PriceSurveyOption.filter(survey_id__in=[s["id"] for s in latest.values()]).values(
-        "survey_id", "price_cny", "option1", "option2"
-    ):
+    for o in await PriceSurveyPrice.filter(
+        survey_id__in=[s["id"] for s in latest.values()], option__deleted_at=None
+    ).values("survey_id", "price_cny", option1="option__option1", option2="option__option2"):
         prices.setdefault(o["survey_id"], []).append(o["price_cny"])
         cat = cats.get(sid_pid.get(o["survey_id"])) or "beverage"
         if option_shipping(o["option1"], o["option2"], cat)["shipping_cny"] is None:

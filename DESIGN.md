@@ -249,7 +249,8 @@ aerich upgrade                          # 실제 적용
 ### 6.1 데이터 모델 (2026-10-18)
 
 ```
-product (제품) 1 ──< N price_survey (가격 조사) 1 ──< N price_survey_option (옵션별 가격)
+product (제품) 1 ──< N product_option (제품 옵션, id 고정) 1 ──< N price_survey_price >── 1 price_survey (가격 조사)
+product 1 ──< N price_survey
 ```
 
 **`product` — 제품 입력** (`models/product/product.py`)
@@ -276,19 +277,35 @@ product (제품) 1 ──< N price_survey (가격 조사) 1 ──< N price_surv
 | `naver_min_price` / `naver_url` | int(원) / varchar | | 네이버 최저가 · 링크 (없어도 됨) |
 | `deleted_at` | timestamptz | | 소프트 삭제 시각 |
 
-**`price_survey_option` — 옵션별 가격**
+**`product_option` — 제품 옵션 (id 고정)** (`models/product/price_survey.py` `ProductOption`, 2026-11-18 옵션 구조 정규화 · migration 46)
 | 컬럼 | 타입 | 필수 | 뜻 |
 |---|---|---|---|
-| `survey_id` | FK → price_survey (삭제 시 같이 삭제) | ✅ | 어느 조사의 옵션인지 |
-| `option1` | varchar(200) | ✅ | 옵션1 (예: 검정) |
-| `option2` | varchar(200) | | 옵션2 (예: L) |
-| `price_cny` | numeric(12,2) | ✅ | 옵션별 가격 (위안) |
-| `photo_url` | varchar(1000) | | 옵션별 사진 (예: 맛별 사진) |
+| `id` | serial | ✅ | **바뀌지 않는 옵션 id** — 예전 `price_survey_option.id` 를 그대로 이어받음 (테이블 이름만 바꿈). 판매가·묶음·경쟁가·마켓 SKU `PR-…-{id}[xN]`·주문 `seller_code`·`market_listing.items[].option_id` 의 열쇠 |
+| `product_id` | FK → product (CASCADE) | ✅ | 어느 제품의 옵션 |
+| `option1` | varchar(200) | ✅ | 옵션1 (맛 등) |
+| `option2` | varchar(200) | | 옵션2 (용량·입수) |
+| `price_cny` | numeric(12,2) | ✅ | **현재 원가** = 이 옵션을 본 살아 있는 조사 중 최근 조사(조사일 → id 큰 순)의 값. 정본은 `price_survey_price`, 이 칸은 `option_service.refresh_current_prices` 만 고친다 |
+| `photo_url` / `barcode` | varchar | | 옵션별 사진 · 바코드(GTIN) |
+| `sort` | smallint | ✅ | 보이는 순서 (같으면 id 순, 기존 옵션은 0) |
+| `deleted_at` | timestamptz | | 소프트 삭제 — 화면·가격 책정에서 숨김, id 는 남아 옛 주문 SKU 를 계속 찾는다 |
 
-- **옵션 총 종류**는 컬럼으로 두지 않고 `price_survey_option` 행 수로 센다 — 따로 저장하면 실제 옵션 수와 어긋난다.
-- 한 제품을 여러 날 다시 조사할 수 있도록 제품 : 조사 = 1 : N.
-- ⚠️ **옵션 id 는 판매가와 마켓 등록의 열쇠다.** `option_price.option_id` 는 CASCADE, `product_pricing.base_option_id` 는 SET NULL, 마켓 등록 `items[].option_id` 는 값으로 참조한다. `PATCH /price-surveys/{id}` 에 `options` 를 보내면 행을 지우고 새 id 로 만들어 이 연결이 모두 끊긴다 (2026-10-25 사고). 이름·사진 수정은 `PATCH /price-surveys/{id}/options/{option_id}` (제자리 수정, id·`price_cny` 유지) 를 쓴다. (2026-10-26)
-- **소프트 삭제**: `DELETE` 는 `deleted_at` 만 채운다. 조회는 `alive_products()` · `alive_surveys()` (제품이 삭제된 조사도 숨김)로만 한다. 코드 발급(`next_code`)은 삭제된 행까지 봐서 코드를 다시 쓰지 않는다.
+- 제약: 살아 있는 옵션 안에서 (제품, 공백 뺀 소문자 옵션1, 옵션2) 유일 (`uidx_product_opt_key_optnorm`). `UNIQUE(id, product_id)` 를 두고 `product_bundle` · `competitor_price` 의 `(option_id, product_id)` 가 복합 FK 로 가리킨다 → 묶음·경쟁가의 `product_id` 가 옵션의 제품과 어긋날 수 없다.
+- `option_price` 는 product_id 가 없어 복합 FK 를 못 건다 — 저장(`PricingService.save`)이 "이 제품의 살아 있는 옵션"만 받는 것으로 막는다.
+
+**`price_survey_price` — 조사별 옵션 가격 (관찰 기록)** (`PriceSurveyPrice`, unique `survey + option`)
+| 컬럼 | 타입 | 필수 | 뜻 |
+|---|---|---|---|
+| `survey_id` | FK → price_survey (CASCADE) | ✅ | 어느 조사에서 |
+| `option_id` | FK → product_option (CASCADE) | ✅ | 어느 옵션을 |
+| `price_cny` | numeric(12,2) | ✅ | 그 조사에서 본 가격 (위안) |
+
+- **조사 = 그날 본 가격 기록.** 새 조사(`POST /price-surveys`)·옵션 목록 수정(`PATCH … options`)·옵션 추가는 `option_service.match_options` 로 기존 제품 옵션에 맞춘다: 같은 (옵션1, 옵션2)(공백·대소문자 무시)면 **같은 id** 를 쓰고, 정말 새 조합만 새 id 를 만든다. 지웠던 옵션과 같은 이름이면 그 id 를 살린다. 새 조사·옵션 추가는 기존 이름 표기를 바꾸지 않고, 옵션 목록 수정(PATCH)만 보낸 표기로 고친다.
+- 새 조사에 없는 기존 옵션은 지우지 않는다 (빼려면 옵션 삭제). 옵션 목록 수정(PATCH `options`)에서 빠진 옵션만 소프트 삭제 — 그 옵션을 살아 있는 마켓 등록이 쓰면 409.
+- **옵션 삭제 = 소프트 삭제** (`option_service.soft_delete`): `deleted_at` + 그 옵션 판매가(`option_price`) 삭제 + `base_option_id` 비움 + 묶음 채택 해제(`deleted_at`) + 경쟁가 `option_id` 비움 — 예전 하드 삭제 때 CASCADE / SET NULL 로 일어나던 것과 같다.
+- 조사 삭제(소프트)는 옵션을 건드리지 않고 현재 원가만 남은 조사 기준으로 다시 맞춘다. `product_pricing.survey_id` 는 RESTRICT — 조사를 하드 삭제해도 가격 책정이 CASCADE 로 날아가지 않는다.
+- **옵션 총 종류**는 컬럼으로 두지 않고 행 수로 센다 (조사 목록 = 그 조사의 `price_survey_price` 수, 가격 책정 = 살아 있는 `product_option` 수).
+- 한 제품을 여러 날 다시 조사할 수 있도록 제품 : 조사 = 1 : N. 옵션 id 가 조사와 무관하므로 판매가·묶음·마켓 연결은 새 조사 뒤에도 그대로 산다 (예전엔 새 조사 = 새 옵션 id 라 판매가가 null 이 됐다).
+- 옵션 이름·사진·바코드만 고칠 때는 `PATCH /price-surveys/{id}/options/{option_id}` (제자리 수정). (2026-10-26, 2026-11-18)- **소프트 삭제**: `DELETE` 는 `deleted_at` 만 채운다. 조회는 `alive_products()` · `alive_surveys()` (제품이 삭제된 조사도 숨김)로만 한다. 코드 발급(`next_code`)은 삭제된 행까지 봐서 코드를 다시 쓰지 않는다.
 - **사진 주소로 저장** (`POST /uploads/photos/from-url`): BE 가 받아 온다 → 연결 전 호스트를 IP 로 풀어 공인 주소만 허용, 리다이렉트는 직접 따라가며 매번 다시 검사 (최대 3번), 15초 · 10MB 제한. 표준 라이브러리 `urllib` 만 쓴다 (의존성 추가 없음).
 
 ### 6.2 계정 (2026-10-18) — 회사 계정은 HQ (2026-10-30)
@@ -314,7 +331,7 @@ app_user 1 ──< N api_key (자동화용 X-API-Key)
 ### 6.3 가격 책정 (2026-10-19)
 
 ```
-product 1 ──< N product_pricing (판매처별 1개) 1 ──< N option_price >── 1 price_survey_option
+product 1 ──< N product_pricing (판매처별 1개) 1 ──< N option_price >── 1 product_option
 exchange_rate (날짜별 위안 환율, 독립 — 최근 행 = 현재 환율)
 exchange_rate_log (저장할 때마다 한 줄 — 추이 그래프, 독립)
 ```
@@ -323,20 +340,20 @@ exchange_rate_log (저장할 때마다 한 줄 — 추이 그래프, 독립)
 | 컬럼 | 타입 | 필수 | 뜻 |
 |---|---|---|---|
 | `product_id` | FK → product (CASCADE) | ✅ | 제품 |
-| `survey_id` | FK → price_survey | ✅ | 기준으로 쓴 가격 조사 |
+| `survey_id` | FK → price_survey (RESTRICT, 2026-11-18) | ✅ | 저장할 때 기준으로 쓴 가격 조사 — 최신 조사와 다르면 FE 가 "새 조사" 로 다시 저장하라고 알린다. 판매가는 옵션 id 가 고정이라 그대로 보인다 |
 | `platform` | varchar(20) | ✅ | `coupang` / `naver` (`core/pricing_config.Platform`) |
 | `fx_rate` | numeric(12,4) | ✅ | **저장 시점 환율 (기록용)** — 계산은 현재 환율로 한다 (2026-10-20). 나중에 환율 변동으로 차익이 바뀐 걸 비교할 때 쓴다 |
 | `fx_date` | date | | 그 환율의 기준일. 고정값(200)을 쓰면 비어 있음 |
 | `fx_markup_pct` | numeric(5,2) | ✅ | 실결제 가산율 %. 기본 `DEFAULT_FX_MARKUP_PCT` (실결제 내역으로 확정 전 0) |
 | `shipping_fee` | int(원) | ✅ | **쓰지 않음** (2026-10-20 부터 옵션별 무게로 계산). 컨럼만 남아 있고 기본값 10000 으로 채워진다 |
 | `platform_fee_rate` / `payment_fee_rate` | numeric(5,2) | ✅ | 플랫폼 · 결제 수수료 % |
-| `base_option_id` | FK → price_survey_option (SET NULL) | | 대표 옵션 — 네이버 추가금 0원인 옵션. 비면 자동 (FE 가 한도를 만족하는 가장 싼 옵션). 마이그레이션 6 (2026-10-20) |
+| `base_option_id` | FK → product_option (SET NULL) | | 대표 옵션 — 네이버 추가금 0원인 옵션. 비면 자동 (FE 가 한도를 만족하는 가장 싼 옵션). 마이그레이션 6 (2026-10-20) |
 
-**`option_price` — 옵션별 판매가** (unique `pricing + option`)
+**`option_price` — 옵션별 판매가** (unique `pricing + option + bundle_qty` — DB 제약은 migration 46 에서 추가)
 | 컬럼 | 타입 | 필수 | 뜻 |
 |---|---|---|---|
 | `pricing_id` | FK → product_pricing (CASCADE) | ✅ | 어느 판매처 설정 |
-| `option_id` | FK → price_survey_option (CASCADE) | ✅ | 어느 옵션 |
+| `option_id` | FK → product_option (CASCADE) | ✅ | 어느 옵션 (id 고정) |
 | `sale_price` | int(원) | ✅ | 판매가 — 사용자가 입력 |
 
 **`exchange_rate` — 위안 환율** (`date` unique(KST), `cny_krw`, `source`) — 가격 책정 · 배송비가 같이 쓰는 하나의 값
@@ -434,7 +451,7 @@ detail_page_common (행 1개, id=1 — S6 해외구매대행 안내 + 등록번�
 
 ### 6.6 마켓 등록 기록 (2026-10-24)
 
-- **`market_listing`** (`models/product/listing.py`) — 제품을 판매처에 올린 상품 1건. `product` FK (CASCADE) · `platform` (coupang/naver) · `market_product_id` (쿠팡 sellerProductId · 네이버 원상품번호, `platform` 과 unique) · `title` · `url` · `status`(마켓이 준 상태) · `listed_at`(업로드 일시) · `items` jsonb `[{option_id, name, sale_price, market_item_id, sku}]` · `source` api/manual · `synced_at` · `memo` · `created_by` · `deleted_at`.
+- **`market_listing`** (`models/product/listing.py`) — 제품을 판매처에 올린 상품 1건. `product` FK (CASCADE) · `platform` (coupang/naver) · `market_product_id` (쿠팡 sellerProductId · 네이버 원상품번호, `platform` 과 unique) · `title` · `url` · `status`(마켓이 준 상태) · `listed_at`(업로드 일시) · `items` jsonb `[{option_id, bundle_qty, name, sale_price, market_item_id, sku, market_sale_price?}]` — `items[].sale_price` 는 마켓에서 불러온 시점 복사본이라 **정본이 아니다** (2026-11-18): API 응답(`listing_dict`)은 `sale_price` 를 가격 책정 `option_price`(같은 판매처·옵션·묶음) 값으로 덮어 내고, 저장된 값은 `market_sale_price`(마켓에서 본 값, 참고용)로 같이 낸다. 2026-11-18 어긋난 41줄은 DB 값을 option_price 로 맞추고 옛 값을 `market_sale_price` 에 남겼다 (마켓 실제 가격은 안 건드림) · `source` api/manual · `synced_at` · `memo` · `created_by` · `deleted_at`.
 - 쿠팡에서 불러오기(`services/product/listing_service.py`): 셀러 상품 목록 → 상세 → 옵션 SKU `{제품 코드}-{옵션 id}` 로 제품을 찾는다. 같은 번호는 덮어쓰고, 사람이 지운 번호는 살리지 않는다. 쿠팡 호출은 `services/order/market_clients._coupang_get`(서명) 을 같이 쓴다.
 - 권한 `listing` (member 포함, API 키 불가). 보기는 로그인만.
 - 상세페이지 응답(`DetailPageSummary`)에 `created_at`(디자인 시작) 추가 — 상품 상세의 '디자인 시간' 계산용.

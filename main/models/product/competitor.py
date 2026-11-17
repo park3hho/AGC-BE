@@ -12,7 +12,7 @@ class CompetitorPrice(BaseModel):
     product = fields.ForeignKeyField("models.Product", related_name="competitor_prices", on_delete=fields.CASCADE)
     platform = fields.CharField(max_length=10)                       # coupang · naver
     # 비교한 우리 옵션 (가격 조사 옵션). 없으면 대표(가장 싼) 옵션과 비교한 것으로 본다
-    option = fields.ForeignKeyField("models.PriceSurveyOption", related_name="competitor_prices", null=True,
+    option = fields.ForeignKeyField("models.ProductOption", related_name="competitor_prices", null=True,
                                     on_delete=fields.SET_NULL)
 
     status = fields.CharField(max_length=12, default="found")        # found(경쟁자 있음) · only_us(우리만 팜) · not_found(검색 안 됨)

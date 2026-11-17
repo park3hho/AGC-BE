@@ -34,7 +34,38 @@ def alive():
     return MarketListing.filter(deleted_at=None, product__deleted_at=None)
 
 
-def listing_dict(x: MarketListing) -> dict:
+async def _sale_prices(listings: list[MarketListing]) -> dict[tuple, int]:
+    """{(제품 id, 판매처, 옵션 id, 묶음 수): 판매가} — 가격 책정(option_price)이 정본 (2026-11-18).
+    items[].sale_price 는 마켓에서 불러온 시점의 복사본이라 어긋날 수 있어 응답에서는 이 값으로 덮는다."""
+    from models.product.pricing import OptionPrice   # 순환 import 피함
+
+    pids = {x.product_id for x in listings if x.items}
+    if not pids:
+        return {}
+    out = {}
+    for r in await OptionPrice.filter(pricing__product_id__in=list(pids)).values(
+            "option_id", "bundle_qty", "sale_price", "pricing__product_id", "pricing__platform"):
+        pf = r["pricing__platform"]
+        out[(r["pricing__product_id"], getattr(pf, "value", pf), r["option_id"], r["bundle_qty"])] = r["sale_price"]
+    return out
+
+
+def _items(x: MarketListing, prices: dict[tuple, int]) -> list[dict]:
+    """sale_price = 가격 책정 판매가 (없으면 저장된 값). market_sale_price = 마켓에서 불러온 값 (복사본, 참고용)."""
+    pf = x.platform.value if hasattr(x.platform, "value") else x.platform
+    out = []
+    for it in x.items or []:
+        stored = it.get("market_sale_price", it.get("sale_price"))
+        try:
+            key = (x.product_id, pf, int(it.get("option_id")), int(it.get("bundle_qty") or 1))
+        except (TypeError, ValueError):
+            key = None
+        price = prices.get(key) if key else None
+        out.append({**it, "sale_price": price if price is not None else it.get("sale_price"), "market_sale_price": stored})
+    return out
+
+
+def listing_dict(x: MarketListing, prices: dict[tuple, int] | None = None) -> dict:
     return {
         "id": x.id,
         "product_id": x.product_id,
@@ -44,7 +75,7 @@ def listing_dict(x: MarketListing) -> dict:
         "url": x.url,
         "status": x.status,
         "listed_at": _iso(x.listed_at),
-        "items": x.items or [],
+        "items": _items(x, prices or {}),
         "source": x.source,
         "synced_at": _iso(x.synced_at),
         "memo": x.memo,
@@ -60,7 +91,8 @@ class ListingService:
         if product_id:
             qs = qs.filter(product_id=product_id)
         rows = await qs.order_by("product_id", "platform", "listed_at", "id")
-        return [listing_dict(x) for x in rows]
+        prices = await _sale_prices(rows)
+        return [listing_dict(x, prices) for x in rows]
 
     @staticmethod
     async def brief() -> list[dict]:
@@ -81,7 +113,7 @@ class ListingService:
                 setattr(old, k, v)
             old.product_id, old.deleted_at, old.source = body.product_id, None, "manual"
             await old.save()
-            return listing_dict(old)
+            return listing_dict(old, await _sale_prices([old]))
         try:
             x = await MarketListing.create(
                 product_id=body.product_id, platform=body.platform, market_product_id=body.market_product_id,
@@ -89,7 +121,7 @@ class ListingService:
             )
         except IntegrityError:
             raise HTTPException(status_code=409, detail="이미 등록된 마켓 상품번호입니다.") from None
-        return listing_dict(x)
+        return listing_dict(x, await _sale_prices([x]))
 
     @staticmethod
     async def update(listing_id: int, body: ListingUpdate) -> dict:
@@ -99,7 +131,7 @@ class ListingService:
         for k in body.model_fields_set:
             setattr(x, k, getattr(body, k))
         await x.save()
-        return listing_dict(x)
+        return listing_dict(x, await _sale_prices([x]))
 
     @staticmethod
     async def delete(listing_id: int) -> None:

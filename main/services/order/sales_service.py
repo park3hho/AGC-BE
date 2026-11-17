@@ -16,7 +16,7 @@ from decimal import Decimal
 from models.order.jiyun import JiyunShipment
 from models.order.order import MarketOrder
 from models.order.purchase import TaobaoPurchase
-from models.product.price_survey import PriceSurveyOption
+from models.product.price_survey import ProductOption
 from models.product.product import Product
 from services.order.order_service import order_dict
 from services.pricing.shipping_service import bundle_option_dict, option_shipping
@@ -38,7 +38,7 @@ async def _estimate(o: MarketOrder, opt_cache: dict, prod_cache: dict) -> tuple[
         return None, None
     code, oid, n = m.group(1).upper(), int(m.group(2)), int(m.group(3) or 1)
     if oid not in opt_cache:
-        opt_cache[oid] = await PriceSurveyOption.get_or_none(id=oid)
+        opt_cache[oid] = await ProductOption.get_or_none(id=oid)
     opt = opt_cache[oid]
     if not opt:
         return None, None

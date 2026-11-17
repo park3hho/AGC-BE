@@ -9,7 +9,9 @@ class ProductPricing(BaseModel):
     차익·마진율은 저장하지 않고 판매가 · 원가 · 수수료로 계산한다."""
 
     product = fields.ForeignKeyField("models.Product", related_name="pricings", on_delete=fields.CASCADE)
-    survey = fields.ForeignKeyField("models.PriceSurvey", related_name="pricings")  # 기준으로 쓴 가격 조사
+    # 기준으로 쓴 가격 조사 — RESTRICT (2026-11-18): 조사를 실제로 지우면(하드) 가격 책정·판매가가 통째로 CASCADE 되던 것을 막는다.
+    #   앱은 조사를 소프트 삭제만 한다
+    survey = fields.ForeignKeyField("models.PriceSurvey", related_name="pricings", on_delete=fields.RESTRICT)
     platform = fields.CharEnumField(Platform, max_length=20)
 
     # 환율 — 가격을 정한 시점 값으로 고정 (나중에 환율이 바뀌면 차익 변화를 비교할 수 있게)
@@ -24,7 +26,7 @@ class ProductPricing(BaseModel):
     # 대표 옵션 — 네이버처럼 "대표가 + 옵션 추가금"으로 등록하는 판매처에서 추가금 0원인 옵션.
     # 비어 있으면 자동 (FE 가 추가금 한도를 만족하는 옵션을 고른다). 옵션이 지워지면 비운다
     base_option = fields.ForeignKeyField(
-        "models.PriceSurveyOption", related_name="base_of_pricings", null=True, on_delete=fields.SET_NULL
+        "models.ProductOption", related_name="base_of_pricings", null=True, on_delete=fields.SET_NULL
     )
 
     class Meta:
@@ -33,11 +35,11 @@ class ProductPricing(BaseModel):
 
 
 class OptionPrice(BaseModel):
-    """판매 옵션 1개의 판매처별 판매가 (원). 판매 옵션 = 가격 조사 옵션 × 묶음 수.
-    묶음 수 1 = 조사 옵션 그대로. 2 이상 = 그 옵션을 N개 묶어 한 상품으로 판다 (core/shipping_config 묶음 판매)."""
+    """판매 옵션 1개의 판매처별 판매가 (원). 판매 옵션 = 제품 옵션(product_option, id 고정) × 묶음 수.
+    묶음 수 1 = 옵션 그대로. 2 이상 = 그 옵션을 N개 묶어 한 상품으로 판다 (core/shipping_config 묶음 판매)."""
 
     pricing = fields.ForeignKeyField("models.ProductPricing", related_name="option_prices", on_delete=fields.CASCADE)
-    option = fields.ForeignKeyField("models.PriceSurveyOption", related_name="prices", on_delete=fields.CASCADE)
+    option = fields.ForeignKeyField("models.ProductOption", related_name="prices", on_delete=fields.CASCADE)
     bundle_qty = fields.SmallIntField(default=1)     # 묶음 수 — 타오바오에서 이 옵션을 몇 개 사서 한 상품으로 파는지
     sale_price = fields.IntField()
 
@@ -75,12 +77,12 @@ class ExchangeRateLog(BaseModel):
 
 
 class ProductBundle(BaseModel):
-    """판매 옵션으로 채택한 묶음 (조사 옵션 × N) — 판매가와 따로 남긴다 (2026-10-26).
+    """판매 옵션으로 채택한 묶음 (제품 옵션 × N) — 판매가와 따로 남긴다 (2026-10-26).
     판매가는 사람이 가격 책정에서 정하므로, 채택만 하고 판매가가 빈 묶음이 있을 수 있다.
     빼면 deleted_at 을 채운다 (기록은 남긴다). 다시 넣으면 같은 줄을 살린다."""
 
     product = fields.ForeignKeyField("models.Product", related_name="bundles", on_delete=fields.CASCADE)
-    option = fields.ForeignKeyField("models.PriceSurveyOption", related_name="bundles", on_delete=fields.CASCADE)
+    option = fields.ForeignKeyField("models.ProductOption", related_name="bundles", on_delete=fields.CASCADE)
     bundle_qty = fields.SmallIntField()
     source = fields.CharField(max_length=10, default="manual")    # rule(10kg 제안 일괄) · manual(화면에서 추가)
     created_by = fields.ForeignKeyField("models.User", related_name="created_bundles", null=True,

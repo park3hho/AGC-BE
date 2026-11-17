@@ -12,7 +12,7 @@ from typing import Optional
 
 from models.order.order import MarketOrder
 from models.product.listing import MarketListing
-from models.product.price_survey import PriceSurvey, PriceSurveyOption
+from models.product.price_survey import PriceSurvey, PriceSurveyPrice, ProductOption
 from models.product.product import Product
 from services.product.listing_service import SKU_RE
 from services.product.serializers import money_cny
@@ -71,10 +71,17 @@ async def order_sourcing(o: MarketOrder) -> Optional[dict]:
                 product_code = None
                 break
 
-    opt = await PriceSurveyOption.get_or_none(id=option_id) if option_id else None
-    survey = await PriceSurvey.get_or_none(id=opt.survey_id) if opt else None
-    if survey:
-        product = await Product.get_or_none(id=survey.product_id)
+    # 옵션 id 는 제품 옵션(product_option) — 지운 옵션도 찾는다 (옛 주문 SKU). 조사 = 그 제품의 최근 살아 있는 조사,
+    # 없으면 이 옵션을 본 마지막 조사 (2026-11-18 옵션 구조 정규화)
+    opt = await ProductOption.get_or_none(id=option_id) if option_id else None
+    survey = None
+    if opt:
+        survey = await PriceSurvey.filter(product_id=opt.product_id, deleted_at=None).order_by("-survey_date", "-id").first()
+        if not survey:
+            ob = await PriceSurveyPrice.filter(option_id=opt.id).order_by("-survey__survey_date", "-survey_id").first()
+            survey = await PriceSurvey.get_or_none(id=ob.survey_id) if ob else None
+    if opt:
+        product = await Product.get_or_none(id=opt.product_id)
     elif product_code:
         product = await Product.get_or_none(code=product_code, deleted_at=None)
         matched_by = matched_by or "product_code"

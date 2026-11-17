@@ -94,8 +94,9 @@ def _check_duplicate_options(options) -> None:
 class PriceSurveyUpdate(BaseModel):
     """보낸 필드만 바꾼다 (model_dump(exclude_unset=True)).
     survey_date · product_code 는 조사 코드번호와 묶여 있어 바꿀 수 없다.
-    ⚠️ options 를 보내면 전체 교체 — 옵션 행을 지우고 새 id 로 다시 만든다. 그 옵션에 저장된 판매가(option_price)가
-    CASCADE 로 지워지고 마켓 등록(listing items.option_id)과도 끊긴다. 이름·사진만 고칠 때는
+    options 를 보내면 이 조사의 옵션 목록을 그것으로 맞춘다 (2026-11-18 옵션 구조 정규화): 같은 (옵션1, 옵션2)
+    (공백·대소문자 무시)는 제품 옵션 id 를 그대로 두고 가격·표기만 고친다. 목록에서 빠진 옵션만 지운다(소프트, 판매가 삭제) —
+    빠진 옵션을 살아 있는 마켓 등록이 쓰면 409. 이름·사진만 고칠 때는
     PATCH /price-surveys/{id}/options/{option_id} (PriceSurveyOptionPatch) 를 쓴다."""
 
     photo_url: Optional[str] = Field(default=None, max_length=1000)
