@@ -17,7 +17,8 @@ from models.product.pricing import OptionPrice, ProductBundle, ProductPricing
 from models.product.product import Product
 from schemas.pricing import PricingSave
 from services.pricing.exchange_rate_service import ExchangeRateService
-from services.pricing.shipping_service import bundle_option_dict, bundle_suggestions, option_dict
+from services.order.measure_service import measure_averages
+from services.pricing.shipping_service import apply_measured, bundle_option_dict, bundle_suggestions, option_dict
 from services.product.option_service import alive_options
 from services.product.price_survey_service import alive_surveys
 from services.product.product_service import alive_products
@@ -115,7 +116,7 @@ async def _pricings(product_id: int, base_survey_id: Optional[int], option_ids: 
 
 
 async def _bundles(product_id: int, options: list[ProductOption], product_code: str,
-                   category: str = "beverage") -> list[dict]:
+                   category: str = "beverage", measured: Optional[dict] = None) -> list[dict]:
     """묶음 판매 옵션 = 10kg 제안 + 어느 판매처에든 판매가가 저장된 묶음. 조사 옵션 순서 → 묶음 수 순서.
     suggested = 규칙이 제안한 묶음 (저장된 것과 겹치면 둘 다 참일 수 있음, saved 는 판매가가 있는지)."""
     if not options:
@@ -132,7 +133,8 @@ async def _bundles(product_id: int, options: list[ProductOption], product_code: 
     order = {o.id: i for i, o in enumerate(options)}
     keys = sorted(saved | suggested | adopted, key=lambda k: (order[k[0]], k[1]))
     return [
-        {**bundle_option_dict(by_id[oid], n, suggested=(oid, n) in suggested, category=category), "saved": (oid, n) in saved,
+        {**apply_measured(bundle_option_dict(by_id[oid], n, suggested=(oid, n) in suggested, category=category),
+                          (measured or {}).get((oid, n))), "saved": (oid, n) in saved,
          "adopted": (oid, n) in adopted,   # 판매 옵션으로 채택함 (판매가는 비어 있을 수 있음)
          # 마켓 판매자 코드 (쿠팡 externalVendorSku) — 주문이 들어오면 이 코드로 조사 옵션 × 묶음을 찾는다
          "sku": f"{product_code}-{oid}x{n}"}
@@ -149,6 +151,7 @@ class PricingService:
         options = list(await alive_options(p.id)) if survey else []
         option_ids = [o.id for o in options]
         fx = await ExchangeRateService.current()
+        measured = await measure_averages(option_ids)   # (옵션, 묶음 수) → 실측 평균 — 있으면 배송비는 실측 기준 (2026-11-18)
         return {
             "product": product_dict(p),
             "survey": (
@@ -156,8 +159,8 @@ class PricingService:
                 if survey else None
             ),
             "fx": fx,                                         # 현재 환율 — 원가·배송비 계산에 쓴다
-            "options": [option_dict(o, p.category) for o in options],     # 옵션 + 배송비(위안) — 차는 부피 무게
-            "bundles": await _bundles(p.id, options, p.code, p.category),   # 묶음 판매 옵션 (제안 + 저장된 것)
+            "options": [option_dict(o, p.category, measured.get((o.id, 1))) for o in options],     # 옵션 + 배송비(위안) — 차는 부피 무게
+            "bundles": await _bundles(p.id, options, p.code, p.category, measured),   # 묶음 판매 옵션 (제안 + 저장된 것)
             "pricings": await _pricings(
                 p.id, survey.id if survey else None, option_ids, list(Platform), fx["cny_krw"]
             ),

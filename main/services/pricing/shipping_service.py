@@ -166,13 +166,37 @@ def shipping_brackets() -> list[dict]:
     return rows
 
 
-def option_dict(o: ProductOption, category: str = "beverage") -> dict:
-    """가격 책정 · 배송비 화면 공통 옵션 모양 (옵션 + 배송비). category = 제품 대분류 (차는 부피 무게)."""
+def apply_measured(d: dict, measured: Optional[dict]) -> dict:
+    """실측 평균(services/order/measure_service.measure_averages)이 있으면 배송비를 실측으로 다시 계산한다 (2026-11-18).
+    계산 무게 = 실측 무게와 실측 상자 부피 무게(가로×세로×높이 / VOLUMETRIC_DIVISOR) 중 큰 값. 추정값은 estimate_* 로 남긴다."""
+    if not measured or measured.get("weight_kg") is None:
+        return {**d, "weight_source": "estimate"}
+    actual = int(round(measured["weight_kg"] * 1000))
+    est = d.get("weight_g")
+    # 추정의 60% 미만 · 160% 초과면 상자를 나눠 보낸 주문(일부만 잰) 등 잘못 붙은 실측일 수 있어 쓰지 않고 표시만 한다
+    if est and not (0.6 * est <= actual <= 1.6 * est):
+        return {**d, "weight_source": "estimate", "measured": measured, "measured_outlier": True}
+    dim = None
+    if measured.get("length_cm") and measured.get("width_cm") and measured.get("height_cm"):
+        dim = int(round(measured["length_cm"] * measured["width_cm"] * measured["height_cm"] / VOLUMETRIC_DIVISOR * 1000))
+    billable = billable_kg(max(actual, dim or 0))
     return {
+        **d, "weight_source": "measured", "measured": measured,
+        "estimate_weight_g": d.get("weight_g"), "estimate_shipping_cny": d.get("shipping_cny"),
+        "weight_g": actual, "dim_weight_g": dim, "box_assumed": False,
+        "billable_kg": _kg(billable), "shipping_cny": money_cny(shipping_cny_for(billable)),
+        "over_limit": billable > SHIPPING_MAX_KG,
+    }
+
+
+def option_dict(o: ProductOption, category: str = "beverage", measured: Optional[dict] = None) -> dict:
+    """가격 책정 · 배송비 화면 공통 옵션 모양 (옵션 + 배송비). category = 제품 대분류 (차는 부피 무게).
+    measured = 이 옵션 1개 상자의 실측 평균 (있으면 배송비는 실측 기준)."""
+    return apply_measured({
         "id": o.id, "option1": o.option1, "option2": o.option2,
         "price_cny": money_cny(o.price_cny), "photo_url": o.photo_url,
         **option_shipping(o.option1, o.option2, category),
-    }
+    }, measured)
 
 
 # ── 묶음 판매 (core/shipping_config 묶음 판매) ─────────────────────────────────
