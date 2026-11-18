@@ -40,3 +40,10 @@ docker exec -w /app agc_app python -m scripts.market.upload resubmit <spid> --ap
 - 네이버 그룹 등록은 **한 번만 POST** 해요. 보낸 요청 id 는 `/private/market/nv_pending.txt` 에 남기고, 결과(COMPLETED)를 본 뒤에만 기록해요. 결과를 못 받으면(TIMEOUT) 다음 실행 때 다시 POST 하지 않고 그 요청의 상태만 봐요 (11-17 중복 그룹 9개 사고 재발 방지).
 - `--add-flavor`: 이미 등록 기록(market_listing)에 있는 sku 는 빼고 새 옵션만 올려요. 네이버는 새 옵션만 담은 그룹을 하나 더 만들고, 기존 그룹·상품은 지우지 않아요. (연습 실행에서는 네이버 필터가 아직 적용되지 않아요 — 실제 실행 경로에만 있음.)
 - 진행 기록: `cp_done.txt`(쿠팡) · `grp_migrated.txt`(네이버 그룹) · `nv_pending.txt` — 모두 `/private/market`.
+
+## 이미 올린 상품에 묶음(2배수 등) 옵션 추가 (2026-11-18 오리온 452~454)
+
+새 상품을 만들면 쿠팡이 'GTIN 중복 — 기존 상품에 추가하라'고 거절해요. 그래서 기존 상품에 옵션을 붙여요. 먼저 option_price 에 bundle_qty=2 판매가를 넣어 두세요 (1배수 이익 유지 + 묶음 배송비).
+
+- 쿠팡: `docker exec -w /app -e PYTHONPATH=/app agc_app python scripts/market/cp_add_bundle.py [spid]` — 기존 seller-product 를 GET 해서 x2 아이템(이름 숫자 ×2 · emptyBarcode · GTIN 속성 유지)을 붙여 PUT. 승인완료 그대로 유지됨. 끝나면 `ListingService.sync_coupang(full=True)`. (제품 id 452~454 고정 — 다른 제품은 스크립트의 id 목록을 바꿔요)
+- 네이버: `python scripts/market/nv_add_bundle.py <그룹번호,…> [--apply]` — 그룹 GET → 새 specificProduct(수량 값 ×2, valueOrder 는 값마다 하나씩 새 번호) 붙여 PUT. 그룹 수정은 한 번에 하나만(ALREADY_RESERVED). 결과는 `/v2/standard-group-products/status?type=UPDATE&requestId=` 의 productNos 로 채널 상품번호를 얻어 market_listing 에 기록.

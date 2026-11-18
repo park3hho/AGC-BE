@@ -131,6 +131,8 @@ async def main(args):
                 bc = BARCODES.get(int(mo.group(1))) if mo else None
                 if bc and bc in used_bc:
                     it["barcode"] = ""; it["emptyBarcode"] = True; it["emptyBarcodeReason"] = "같은 바코드 옵션이 따로 있음"
+                    if re.search(r"x\d+$", it["externalVendorSku"]):   # 묶음(x2 등)은 공식 브랜드 GTIN 속성이 필요 — 없으면 "MPN/GTIN 속성 누락" (2026-11-18 오리온 x2)
+                        it["attributes"].append({"attributeTypeName": "Global Trade Item Number", "attributeValueName": bc})
                     keep.append(it); continue
                 if bc:
                     used_bc.add(bc)
