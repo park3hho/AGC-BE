@@ -4,7 +4,7 @@
 - 방문자 = visitor(브라우저 무작위 id) 수, 세션 = session 수, 열람 = page_view 수
 - 주문 · 매출은 방문 기록이 아니라 shop_order(결제 완료, 시험 결제 제외)가 원본
 - 유입 경로 = 세션의 첫 화면(landing)의 utm_source → 없으면 referrer 호스트로 분류 → 없으면 '직접 방문'
-기간은 KST 날짜 [from, to]."""
+기간은 KST 날짜 [from, to]. 기본은 국내 손님만 (해외 봇 · 우리 계정 제외), all 이면 전부."""
 
 from collections import Counter, defaultdict
 from datetime import date, datetime, timedelta, timezone
@@ -12,6 +12,13 @@ from datetime import date, datetime, timedelta, timezone
 from tortoise import Tortoise
 
 KST = timezone(timedelta(hours=9))
+
+# 기본 보기 = 국내 손님만 (2026-11-18 사용자: 유입 분석). all=True 면 전부.
+#  - 해외 접속(country 가 KR 이 아님) 은 지금까지 전부 봇 · 크롤러였다 (11-15~11-18: 미국 · 싱가포르 · 인도, 첫 화면 0초)
+#  - 우리 계정: 이메일이 @eidofood.com (테스트 · QA · 카카오페이 심사) 이거나 아래 id (대표 본인).
+#    한 번이라도 이 계정으로 로그인한 브라우저(visitor)는 로그인 전 기록까지 뺀다.
+INTERNAL_EMAIL_DOMAIN = "@eidofood.com"
+INTERNAL_MEMBER_IDS = (3,)   # 박찬호 (대표, 개인 메일 가입)
 
 SOURCE_RULES = (   # (호스트에 들어 있으면, 이름)
     ("naver", "네이버"), ("google", "구글"), ("instagram", "인스타그램"), ("facebook", "페이스북"), ("fb.", "페이스북"),
@@ -48,7 +55,7 @@ def _page(path: str) -> str:
     return p
 
 
-async def summary(date_from: date | None, date_to: date | None) -> dict:
+async def summary(date_from: date | None, date_to: date | None, include_all: bool = False) -> dict:
     today = datetime.now(KST).date()
     d_to = date_to or today
     d_from = date_from or (d_to - timedelta(days=6))
@@ -56,12 +63,23 @@ async def summary(date_from: date | None, date_to: date | None) -> dict:
     end = datetime.combine(d_to + timedelta(days=1), datetime.min.time(), KST)
     conn = Tortoise.get_connection("default")
 
-    ev = await conn.execute_query_dict(
-        """select at, type, visitor, session, path, product_code, value, referrer, utm_source, landing, device, browser, os
-           from shop.shop_event where at >= $1 and at < $2 order by at""", [start, end])
+    internal = await conn.execute_query_dict(
+        "select id from shop.member where email ilike $1 or id = any($2::int[])", [f"%{INTERNAL_EMAIL_DOMAIN}", list(INTERNAL_MEMBER_IDS)])
+    internal_ids = [r["id"] for r in internal]
+    ev_all = await conn.execute_query_dict(
+        """select at, type, visitor, session, path, product_code, value, referrer, utm_source, landing, device, browser, os,
+                  country, (member_id = any($3::int[])) as internal
+           from shop.shop_event where at >= $1 and at < $2 order by at""", [start, end, internal_ids])
+    internal_visitors = {e["visitor"] for e in ev_all if e["internal"]}
+    foreign_visitors = {e["visitor"] for e in ev_all if e["country"] and e["country"] != "KR"} - internal_visitors
+    if include_all:
+        ev = ev_all
+    else:
+        ev = [e for e in ev_all if e["visitor"] not in internal_visitors and (not e["country"] or e["country"] == "KR")]
     orders = await conn.execute_query_dict(
         """select code, total_amount, paid_at from shop.shop_order
-           where paid_at >= $1 and paid_at < $2 and status = 'paid' and coalesce(test, false) = false""", [start, end])
+           where paid_at >= $1 and paid_at < $2 and status = 'paid' and coalesce(test, false) = false
+             and ($3 or member_id is null or not (member_id = any($4::int[])))""", [start, end, include_all, internal_ids])
     live_since = datetime.now(timezone.utc) - timedelta(minutes=30)
     live = await conn.execute_query_dict(
         "select count(distinct visitor) as n from shop.shop_event where at >= $1", [live_since])
@@ -141,6 +159,8 @@ async def summary(date_from: date | None, date_to: date | None) -> dict:
     durations.sort()
     return {
         "range": {"from": d_from.isoformat(), "to": d_to.isoformat()},
+        "filter": {"all": include_all, "excluded_foreign": 0 if include_all else len(foreign_visitors),
+                   "excluded_internal": 0 if include_all else len(internal_visitors)},
         "live": live[0]["n"] if live else 0,
         "total": {
             "visitors": len(visitors), "sessions": n_sess, "views": views,
@@ -165,7 +185,7 @@ async def summary(date_from: date | None, date_to: date | None) -> dict:
                             for c, p in prod.items()), key=lambda x: (-x["views"], -x["carts"]))[:15],
         "devices": sorted(({"name": k, "visitors": len(v)} for k, v in devices.items()), key=lambda x: -x["visitors"]),
         "browsers": sorted(({"name": k, "visitors": len(v)} for k, v in browsers.items()), key=lambda x: -x["visitors"]),
-        "tracking_since": None if ev else await _first_event(conn),
+        "tracking_since": None if ev_all else await _first_event(conn),
     }
 
 

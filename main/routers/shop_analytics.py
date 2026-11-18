@@ -18,13 +18,14 @@ router = APIRouter(prefix="/shop-analytics", tags=["ShopAnalytics"])
 @router.get("")
 async def shop_analytics_summary(date_from: Optional[date] = Query(default=None, alias="from"),
                                  date_to: Optional[date] = Query(default=None, alias="to"),
+                                 all: bool = Query(default=False),   # true = 해외 접속 · 우리 계정까지 전부 (기본은 국내 손님만)
                                  auth=Depends(require_feature(Feature.ORDER))):
     if date_from and date_to and date_from > date_to:
         raise HTTPException(status_code=400, detail="시작일이 종료일보다 늦어요.")
     if date_from and date_to and (date_to - date_from).days > 400:
         raise HTTPException(status_code=400, detail="기간은 400일까지예요.")
     try:
-        return success(**await shop_analytics.summary(date_from, date_to))
+        return success(**await shop_analytics.summary(date_from, date_to, all))
     except HTTPException:
         raise
     except Exception as e:
