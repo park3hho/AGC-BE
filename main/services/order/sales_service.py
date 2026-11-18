@@ -19,6 +19,7 @@ from models.order.purchase import TaobaoPurchase
 from models.product.price_survey import ProductOption
 from models.product.product import Product
 from services.order.order_service import order_dict
+from services.order.stock_service import held_purchase_ids
 from services.pricing.shipping_service import bundle_option_dict, option_shipping
 
 KST = timezone(timedelta(hours=9))
@@ -67,6 +68,7 @@ class SalesService:
         for j in await JiyunShipment.filter(order_id__in=ids, deleted_at=None):
             jiyuns[j.order_id].append(j)
         opt_cache, prod_cache = {}, {}
+        held = await held_purchase_ids()   # 집운 재고로 보관 중인 구매 — 취소 주문 손실로 안 셈 (2026-11-18)
 
         for o in orders:
             amt = order_dict(o).get("amount") or {}
@@ -75,7 +77,7 @@ class SalesService:
             est_flags = []
             if cancelled:
                 total = settle = 0
-                purchase = sum(p.charged_krw or 0 for p in ps if "退款成功" not in (p.memo or ""))
+                purchase = sum(p.charged_krw or 0 for p in ps if "退款成功" not in (p.memo or "") and p.id not in held)
                 jiyun = sum(j.charged_krw or 0 for j in js if "退款成功" not in (j.memo or ""))
             else:
                 total = amt.get("total") or o.total_price or 0

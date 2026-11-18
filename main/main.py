@@ -22,6 +22,7 @@ from routers import (
     taobao_purchase,
     jiyun,
     jiyun_bundle,
+    jiyun_stock,
     domestic,
     thumb,
     shop_analytics,
@@ -86,6 +87,7 @@ app.include_router(order_document.router)   # /orders/{id}/documents — /orders
 app.include_router(order.router)
 app.include_router(taobao_purchase.router)
 app.include_router(jiyun_bundle.router)   # 집운 묶음 PRE_LP… (2026-11-16) — /jiyun 보다 먼저
+app.include_router(jiyun_stock.router)   # 집운 가용재고 (2026-11-18) — /jiyun 보다 먼저
 app.include_router(jiyun.router)
 app.include_router(domestic.router)
 app.include_router(shop_analytics.router)   # 자사몰 분석 (2026-11-15)

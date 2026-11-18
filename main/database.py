@@ -25,6 +25,7 @@ TORTOISE_ORM = {
                 "models.order.document",   # 주문 증빙 파일 — 타오바오 영수증 · 집운 결제 내역 · 마켓 정산 내역
                 "models.order.import_decl",   # 수입식품 구매대행 수입신고 (2026-11-11)
                 "models.order.bundle",   # 집운 묶음 PRE_LP… — 받는 사람별 한 상자, 결제하면 LP 번호 (2026-11-16)
+                "models.order.stock",   # 집운 가용재고 — 취소됐지만 환불 못 받은 소포를 다음 같은 주문에 씀 (2026-11-18)
                 "aerich.models",
             ],
             "default_connection": "default",
