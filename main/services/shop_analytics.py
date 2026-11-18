@@ -186,9 +186,58 @@ async def summary(date_from: date | None, date_to: date | None, include_all: boo
         "devices": sorted(({"name": k, "visitors": len(v)} for k, v in devices.items()), key=lambda x: -x["visitors"]),
         "browsers": sorted(({"name": k, "visitors": len(v)} for k, v in browsers.items()), key=lambda x: -x["visitors"]),
         "tracking_since": None if ev_all else await _first_event(conn),
+        "traffic": await _traffic(conn, d_from, d_to),
     }
 
 
 async def _first_event(conn) -> str | None:
     r = await conn.execute_query_dict("select min(at) as t from shop.shop_event")
     return r[0]["t"].isoformat() if r and r[0]["t"] else None
+
+
+REASON_NAMES = {"bot": "봇", "scanner": "스캐너(취약점 찔러보기)", "rate_limit": "과다 요청", "not_found": "없는 주소",
+                "empty_ua": "브라우저 정보 없음", "bad_payload": "잘못된 기록"}
+
+
+async def _traffic(conn, d_from: date, d_to: date) -> dict:
+    """서버로 들어온 요청 수 (SHOP-BE services/traffic.py → shop.traffic_hit, 2026-11-18~) — 정상 · 검색 봇 · 무효.
+    방문 기록(shop_event)과 달리 화면을 안 그리는 봇 · 스캐너까지 센다 = 서버가 실제로 받은 부담."""
+    try:
+        rows = await conn.execute_query_dict(
+            "select day, kind, reason, agent, country, path, hits from shop.traffic_hit where day between $1 and $2", [d_from, d_to])
+    except Exception:
+        return {"since": None, "total": 0, "days": [], "kinds": {}, "reasons": [], "agents": [], "paths": [], "countries": []}
+    days = {}
+    d = d_from
+    while d <= d_to:
+        days[d.isoformat()] = {"date": d.isoformat(), "valid": 0, "crawler": 0, "invalid": 0}
+        d += timedelta(days=1)
+    kinds, reasons, agents, paths, countries = Counter(), Counter(), Counter(), Counter(), Counter()
+    crawlers = Counter()
+    for r in rows:
+        k, n = r["kind"], r["hits"]
+        kinds[k] += n
+        row = days.get(r["day"].isoformat())
+        if row:
+            row[k] = row.get(k, 0) + n
+        if k == "crawler":
+            crawlers[r["agent"]] += n
+        if k == "invalid":
+            reasons[r["reason"]] += n
+            agents[r["agent"]] += n
+            paths[r["path"]] += n
+            countries[r["country"] or "?"] += n
+    since = await conn.execute_query_dict("select min(day) as d from shop.traffic_hit")
+    total = sum(kinds.values())
+    return {
+        "since": since[0]["d"].isoformat() if since and since[0]["d"] else None,
+        "total": total,
+        "kinds": {"valid": kinds["valid"], "crawler": kinds["crawler"], "invalid": kinds["invalid"]},
+        "invalid_pct": round(kinds["invalid"] / total * 100) if total else None,
+        "days": list(days.values()),
+        "reasons": [{"key": k, "name": REASON_NAMES.get(k, k), "hits": n} for k, n in reasons.most_common()],
+        "agents": [{"name": k, "hits": n} for k, n in agents.most_common(10)],
+        "crawlers": [{"name": k, "hits": n} for k, n in crawlers.most_common(8)],
+        "paths": [{"path": k, "hits": n} for k, n in paths.most_common(10)],
+        "countries": [{"code": k, "hits": n} for k, n in countries.most_common(8)],
+    }
