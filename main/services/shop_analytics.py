@@ -271,3 +271,91 @@ async def _traffic(conn, d_from: date, d_to: date) -> dict:
         "paths": [{"path": k, "hits": n} for k, n in paths.most_common(10)],
         "countries": [{"code": k, "hits": n} for k, n in countries.most_common(8)],
     }
+
+
+async def digest(hours: int = 6) -> dict:
+    """최근 N시간 자사몰 유입 요약 — 6시간마다 도는 점검이 읽는다 (2026-11-18 사용자: "API 만들어서 6시간 간격으로").
+    진짜 손님(국내 · 우리 계정 아님 · 몰아치기 봇 아님)과 그 밖(해외 · 몰아치기 · 우리 계정 · 서버 무효 요청)을 나눠 센다.
+    notable = 알릴 만한 일 (진짜 손님 · 검색/외부 유입 · 장바구니 이상 · 결제 완료)."""
+    hours = max(1, min(hours, 168))
+    now = datetime.now(timezone.utc)
+    since = now - timedelta(hours=hours)
+    conn = Tortoise.get_connection("default")
+    internal = await conn.execute_query_dict(
+        "select id from shop.member where email ilike $1 or id = any($2::int[])", [f"%{INTERNAL_EMAIL_DOMAIN}", list(INTERNAL_MEMBER_IDS)])
+    internal_ids = [r["id"] for r in internal]
+    # 몰아치기 판정은 창 앞뒤 2분을 더 본다
+    ev_all = await conn.execute_query_dict(
+        """select at, type, visitor, session, path, product_code, referrer, utm_source, country, ip_hash, device, browser,
+                  (member_id = any($2::int[])) as internal
+           from shop.shop_event where at >= $1 order by at""", [since - timedelta(seconds=BURST_WINDOW_SEC), internal_ids])
+    internal_v = {e["visitor"] for e in ev_all if e["internal"]}
+    burst_v = _burst_visitors(ev_all) - internal_v
+    ev = [e for e in ev_all if e["at"] >= since]
+    foreign_v = {e["visitor"] for e in ev if e["country"] and e["country"] != "KR"} - internal_v - burst_v
+    real = [e for e in ev if e["visitor"] not in internal_v | burst_v | foreign_v]
+
+    sessions: dict[str, dict] = {}
+    for e in real:
+        s = sessions.setdefault(e["session"], {"first": e["at"], "last": e["at"], "pages": [], "products": [], "steps": set(),
+                                               "src": None, "device": e["device"], "browser": e["browser"]})
+        s["last"] = e["at"]
+        if s["src"] is None and (e["utm_source"] or e["referrer"]):
+            s["src"] = _source(e["utm_source"], e["referrer"])
+        if e["type"] == "page_view":
+            s["pages"].append(_page(e["path"]))
+        if e["type"] == "product_view" and e["product_code"]:
+            s["products"].append(e["product_code"])
+        s["steps"].add(e["type"])
+    codes = sorted({c for s in sessions.values() for c in s["products"]})
+    names = {}
+    if codes:
+        for r in await conn.execute_query_dict("select code, title_ko from product where code = any($1::text[])", [codes]):
+            names[r["code"]] = r["title_ko"]
+    orders = await conn.execute_query_dict(
+        """select code, total_amount, item_name, paid_at from shop.shop_order
+           where paid_at >= $1 and status = 'paid' and coalesce(test, false) = false
+             and (member_id is null or not (member_id = any($2::int[])))""", [since, internal_ids])
+    day_from = since.astimezone(KST).date()
+    tr = await conn.execute_query_dict(
+        "select kind, reason, agent, sum(hits) as n from shop.traffic_hit where day >= $1 group by 1, 2, 3", [day_from])
+    kinds = Counter()
+    bad_agents = Counter()
+    for r in tr:
+        kinds[r["kind"]] += r["n"]
+        if r["kind"] == "invalid":
+            bad_agents[f"{r['agent']} ({REASON_NAMES.get(r['reason'], r['reason'])})"] += r["n"]
+
+    sess_list = []
+    for s in sorted(sessions.values(), key=lambda x: x["first"]):
+        sess_list.append({
+            "at": s["first"].astimezone(KST).strftime("%m-%d %H:%M"),
+            "source": s["src"] or "직접 방문",
+            "pages": len(s["pages"]),
+            "seconds": int((s["last"] - s["first"]).total_seconds()),
+            "products": [names.get(c, c) for c in dict.fromkeys(s["products"])][:5],
+            "cart": "add_to_cart" in s["steps"], "checkout": "begin_checkout" in s["steps"], "purchase": "purchase" in s["steps"],
+            "device": s["device"], "browser": s["browser"],
+        })
+    sources = Counter(x["source"] for x in sess_list)
+    real_visitors = len({e["visitor"] for e in real})
+    outside = sum(n for k, n in sources.items() if k != "직접 방문")
+    # 알릴 일: 실제로 둘러본 손님(화면 2개+ 또는 상품 조회) · 바깥(검색 · SNS) 유입 · 결제. 첫 화면 0초 이탈 한 번은 알리지 않는다
+    engaged = sum(1 for x in sess_list if x["pages"] >= 2 or x["products"])
+    notable = bool(engaged or orders or outside)
+    return {
+        "window": {"hours": hours, "from": since.astimezone(KST).strftime("%Y-%m-%d %H:%M"), "to": now.astimezone(KST).strftime("%Y-%m-%d %H:%M")},
+        "notable": notable,
+        "real": {"visitors": real_visitors, "sessions": len(sess_list), "engaged": engaged, "outside": outside,
+                 "product_views": sum(len(x["products"]) for x in sess_list),
+                 "carts": sum(x["cart"] for x in sess_list), "checkouts": sum(x["checkout"] for x in sess_list),
+                 "orders": len(orders), "revenue": sum(o["total_amount"] or 0 for o in orders),
+                 "sources": [{"name": k, "sessions": n} for k, n in sources.most_common()]},
+        "sessions": sess_list[:20],
+        "orders": [{"code": o["code"], "amount": o["total_amount"], "item": o["item_name"],
+                    "at": o["paid_at"].astimezone(KST).strftime("%m-%d %H:%M")} for o in orders],
+        "excluded": {"foreign": len(foreign_v), "burst_bot": len(burst_v & {e["visitor"] for e in ev}),
+                     "internal": len(internal_v & {e["visitor"] for e in ev})},
+        "server": {"since_day": day_from.isoformat(), "valid": kinds["valid"], "crawler": kinds["crawler"], "invalid": kinds["invalid"],
+                   "top_invalid": [{"name": k, "hits": n} for k, n in bad_agents.most_common(5)]},
+    }
