@@ -15,6 +15,7 @@ KST = timezone(timedelta(hours=9))
 
 # 기본 보기 = 국내 손님만 (2026-11-18 사용자: 유입 분석). all=True 면 전부.
 #  - 해외 접속(country 가 KR 이 아님) 은 지금까지 전부 봇 · 크롤러였다 (11-15~11-18: 미국 · 싱가포르 · 인도, 첫 화면 0초)
+#  - 몰아치기: 같은 IP 해시에서 2분 안에 새 방문자 3명 이상 = 브라우저인 척하는 수집 봇 (_burst_visitors)
 #  - 우리 계정: 이메일이 @eidofood.com (테스트 · QA · 카카오페이 심사) 이거나 아래 id (대표 본인).
 #    한 번이라도 이 계정으로 로그인한 브라우저(visitor)는 로그인 전 기록까지 뺀다.
 INTERNAL_EMAIL_DOMAIN = "@eidofood.com"
@@ -55,6 +56,32 @@ def _page(path: str) -> str:
     return p
 
 
+BURST_WINDOW_SEC = 120   # 이 안에
+BURST_MIN_VISITORS = 3   # 같은 IP(해시)에서 새 방문자가 이만큼 생기면 = 브라우저인 척하는 수집 봇
+
+
+def _burst_visitors(ev: list[dict]) -> set[str]:
+    """보통 브라우저 이름을 쓰는 수집 봇 — 같은 IP 해시에서 2분 안에 새 방문자(id)가 3개 이상 생기면 그 방문자들 (2026-11-18).
+    사람은 같은 브라우저 id 를 유지하는데, 봇은 화면마다 저장소를 비워 매번 새 방문자가 된다 (예: 독일 2곳에서 4초에 5명)."""
+    first: dict[str, tuple] = {}
+    for e in ev:
+        if e["visitor"] not in first and e.get("ip_hash"):
+            first[e["visitor"]] = (e["ip_hash"], e["at"])
+    by_ip: dict[str, list] = defaultdict(list)
+    for v, (ip, at) in first.items():
+        by_ip[ip].append((at, v))
+    out = set()
+    for rows in by_ip.values():
+        rows.sort()
+        for i in range(len(rows)):
+            j = i
+            while j + 1 < len(rows) and (rows[j + 1][0] - rows[i][0]).total_seconds() <= BURST_WINDOW_SEC:
+                j += 1
+            if j - i + 1 >= BURST_MIN_VISITORS:
+                out.update(v for _, v in rows[i:j + 1])
+    return out
+
+
 async def summary(date_from: date | None, date_to: date | None, include_all: bool = False) -> dict:
     today = datetime.now(KST).date()
     d_to = date_to or today
@@ -68,14 +95,16 @@ async def summary(date_from: date | None, date_to: date | None, include_all: boo
     internal_ids = [r["id"] for r in internal]
     ev_all = await conn.execute_query_dict(
         """select at, type, visitor, session, path, product_code, value, referrer, utm_source, landing, device, browser, os,
-                  country, (member_id = any($3::int[])) as internal
+                  country, ip_hash, (member_id = any($3::int[])) as internal
            from shop.shop_event where at >= $1 and at < $2 order by at""", [start, end, internal_ids])
     internal_visitors = {e["visitor"] for e in ev_all if e["internal"]}
     foreign_visitors = {e["visitor"] for e in ev_all if e["country"] and e["country"] != "KR"} - internal_visitors
+    burst_visitors = _burst_visitors(ev_all) - internal_visitors - foreign_visitors
     if include_all:
         ev = ev_all
     else:
-        ev = [e for e in ev_all if e["visitor"] not in internal_visitors and (not e["country"] or e["country"] == "KR")]
+        ev = [e for e in ev_all if e["visitor"] not in internal_visitors and e["visitor"] not in burst_visitors
+              and (not e["country"] or e["country"] == "KR")]
     orders = await conn.execute_query_dict(
         """select code, total_amount, paid_at from shop.shop_order
            where paid_at >= $1 and paid_at < $2 and status = 'paid' and coalesce(test, false) = false
@@ -160,7 +189,8 @@ async def summary(date_from: date | None, date_to: date | None, include_all: boo
     return {
         "range": {"from": d_from.isoformat(), "to": d_to.isoformat()},
         "filter": {"all": include_all, "excluded_foreign": 0 if include_all else len(foreign_visitors),
-                   "excluded_internal": 0 if include_all else len(internal_visitors)},
+                   "excluded_internal": 0 if include_all else len(internal_visitors),
+                   "excluded_burst": 0 if include_all else len(burst_visitors)},
         "live": live[0]["n"] if live else 0,
         "total": {
             "visitors": len(visitors), "sessions": n_sess, "views": views,
