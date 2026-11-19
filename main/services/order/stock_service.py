@@ -129,17 +129,17 @@ class StockService:
                 raise HTTPException(status_code=404, detail="재고를 찾지 못했습니다.")
             if s.status != "available":
                 raise HTTPException(status_code=409, detail=f"이 재고는 지금 '{STATUS.get(s.status, s.status)}' 상태라 쓸 수 없습니다.")
-            o = await MarketOrder.using_db(conn).get_or_none(id=order_id)
+            o = await MarketOrder.filter(id=order_id).using_db(conn).first()
             if not o:
                 raise HTTPException(status_code=404, detail="고객 주문을 찾지 못했습니다.")
             if o.stage == "cancelled":
                 raise HTTPException(status_code=409, detail="취소된 주문에는 재고를 쓸 수 없습니다.")
-            if await TaobaoPurchase.using_db(conn).filter(order_id=o.id, deleted_at=None).exclude(cn_status="cancelled").exists():
+            if await TaobaoPurchase.filter(order_id=o.id, deleted_at=None).exclude(cn_status="cancelled").using_db(conn).exists():
                 raise HTTPException(status_code=409, detail="이 주문에는 이미 타오바오 구매가 있습니다. 재고를 쓰려면 그 구매를 먼저 정리해 주세요.")
             code, opt, qty = parse_sku(o.seller_code)
             if s.product_code and code and (s.product_code != code or (s.option_id is not None and opt is not None and s.option_id != opt)):
                 raise HTTPException(status_code=409, detail=f"상품이 다릅니다 — 재고 {s.sku} / 주문 {o.seller_code}.")
-            p = await TaobaoPurchase.using_db(conn).select_for_update().get(id=s.purchase_id)
+            p = await TaobaoPurchase.filter(id=s.purchase_id).using_db(conn).select_for_update().get()
             old_order_id = p.order_id
             p.order_id = o.id
             p.memo = (p.memo or "") + f" [집운 재고 #{s.id} → {o.code} 에 씀 {datetime.now(timezone.utc):%Y-%m-%d}]"
