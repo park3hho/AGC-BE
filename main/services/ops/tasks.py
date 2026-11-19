@@ -273,7 +273,9 @@ async def compute(include_test: bool = False) -> dict:
 # 루틴은 회차 맨 앞에서 GET /ops/check-mode 를 부르고, full 일 때만 플레이북을 읽고 정식 점검을 한다.
 URGENT_TYPES = ("claim", "confirm", "naver_delay", "import_decl", "cancel_followup", "purchase",
                 "jiyun_pay_notice", "invoice")
-DAILY_FULL_H = 4         # 강제 정식 점검은 하루 한 번 04:30 이후 첫 회차 = 04:46 (사용자 11-19 정정) — 04:00 주문 놓침 점검(risk 알림) 바로 뒤, 서버가 모르는 브라우저 변화 확인
+RUN_EVERY_MIN = 45       # 루틴 간격 (11-19 사용자 "45분 단위", 00:00 기준 격자 00:00·00:45·01:30 …)
+NEW_WINDOW_MIN = 55      # 새 주문·클레임을 full 로 잡는 창 — 회차 간격(45분)보다 넉넉히
+DAILY_FULL_H = 4         # 강제 정식 점검은 하루 한 번 04:30 회차 (사용자 11-19 정정) — 04:00 주문 놓침 점검(risk 알림) 바로 뒤, 서버가 모르는 브라우저 변화 확인
 NIGHT = range(1, 8)       # 01~07시: 할 일 없으면 skip (idle 과 같음, 표시만 다름)
 
 
@@ -298,7 +300,7 @@ async def check_mode(now: datetime | None = None) -> dict:
     unrep = await AgentAlert.filter(reported_at=None, resolved_at=None).count()
     if unrep:
         reasons.append(f"안 전한 알림 {unrep}")
-    since = now - timedelta(minutes=40)
+    since = now - timedelta(minutes=NEW_WINDOW_MIN)
     new_orders = await MarketOrder.filter(created_at__gte=since, is_test=False).count()
     new_claims = await MarketOrder.filter(claim_at__gte=since, is_test=False).count()
     if new_orders:
@@ -310,10 +312,10 @@ async def check_mode(now: datetime | None = None) -> dict:
         mode = "full"
     elif k.hour == DAILY_FULL_H and k.minute >= 30:
         mode, reasons = "full", ["하루 한 번 정식 점검 (04:30 이후 첫 회차, 브라우저로만 보이는 변화 확인)"]
-    elif (t["counts"].get("jiyun_pay_wait") or t["counts"].get("dispatch_check") or sent_decl) and k.minute < 30:
+    elif (t["counts"].get("jiyun_pay_wait") or t["counts"].get("dispatch_check") or sent_decl) and ((k.hour * 60 + k.minute) // RUN_EVERY_MIN) % 2 == 0:
         why = [w for w, n in (("집운 결제 대기", t["counts"].get("jiyun_pay_wait")), ("출고 대기", t["counts"].get("dispatch_check")),
                                ("수입신고 접수 전", sent_decl)) if n]
-        mode, reasons = "full", [" · ".join(why) + " 있음 → 매시 첫 회차 확인"]
+        mode, reasons = "full", [" · ".join(why) + f" 있음 → 두 회차에 한 번({RUN_EVERY_MIN * 2}분마다) 확인"]
     elif k.hour in NIGHT:
         mode, reasons = "skip", ["밤 회차 — 할 일 없음"]
     else:
