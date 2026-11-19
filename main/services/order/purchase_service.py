@@ -150,6 +150,8 @@ class TaobaoPurchaseService:
         data["items"] = _items(body)
         if data.get("charged_status") is None:
             data.pop("charged_status", None)      # 기본값 none (모름)
+        if data.get("refund_status") is None:
+            data.pop("refund_status", None)       # 기본값 none — null 이 넘어가면 ValueError (11-19 구매 등록 500)
         _auto_times(data, None)
         # 발주확인 먼저 (2026-10-25) — AGC 가 아직 모르면 마켓에서 이 주문만 바로 다시 본다 (Wing·센터에서 직접 한 경우)
         pre = await MarketOrder.get_or_none(id=body.order_id)
