@@ -3,7 +3,10 @@
 사용자 원칙: AI 가 세션 메모에 들고 다니던 일(다음 차례 · 대체 검색어 · 사람 확인 메모 · 건너뛰기)은 DB 와 API 로 옮기고 AI 는 읽기만 한다.
 
 확인 1줄 = 제품 × 판매처 × 비교 옵션 (competitor_price 1줄, 아직 없으면 대표 옵션).
-사유와 순서 (앞일수록 먼저):
+순서 = 가중치 점수 높은 순 (2026-11-19 사용자 승인): 점수 = 사유 + 경과 + 매출 + 경쟁. 가중치는 core/competitor_config.py.
+제외(대기열에서 빠짐, include_skipped=true 면 뒤에 excluded 표시로): 보류 기간(새 사유가 없을 때) · 사람 확인 필요 ·
+  24시간 안 확인 + 새 사유 없음. 새 사유 = 주문 · 판매가/원가/옵션/상품명 수정 · 신규 · 확인 필요 표시 (not_found 재시도는 아님).
+아래 group 은 화면 표시용 묶음(가장 앞선 사유)이다:
   1 order       주문 들어옴 — 마지막 확인이 24시간보다 오래됐고 그 뒤에 그 마켓 주문이 들어온 제품
   2 changed     수정 — 확인 때 기준값(basis)과 지금 값이 다름: 판매가 · 원가(조사가 · 실구매가 · 운임) · 옵션/상품명,
                 또는 그 뒤에 새 옵션 · 새 마켓 등록 · 손으로 단 '확인 필요' 표시
@@ -11,7 +14,6 @@
   4 retry       지난번 검색 안 됨(not_found) — 다시 찾기
   5 watch       lose · match — 경쟁자 가격 다시 보기
   6 stale       그 밖 — 오래된 순
-skip_until(보류)은 4~6 에만 적용 — 주문 · 수정 · 신규는 보류 중이어도 올라온다.
 표시는 저장(bulk)하면 저절로 풀린다: 새 checked_at 과 새 기준값이 들어가므로 같은 사유가 다시 생기지 않는다."""
 
 import re
@@ -20,6 +22,7 @@ from typing import Optional
 
 from tortoise.functions import Max
 
+from core import competitor_config as W
 from models.order.order import MarketOrder
 from models.product.competitor import CompetitorWatch
 from models.product.listing import MarketListing
@@ -29,7 +32,6 @@ from services.product.competitor_service import CompetitorService, basis_of
 
 KST = timezone(timedelta(hours=9))
 ORDER_FRESH_HOURS = 24        # 마지막 확인이 이보다 오래됐을 때만 '주문 들어옴'
-ORDER_LOOKBACK_DAYS = 3       # 이 안에 들어온 주문만 본다
 RANK = {"order": 1, "changed": 2, "new": 3, "retry": 4, "watch": 5, "stale": 6}
 LABEL = {"order": "주문 들어옴", "changed": "수정", "new": "확인 전", "retry": "검색 안 됨 다시", "watch": "lose·match 재확인",
          "stale": "오래된 순"}
@@ -67,6 +69,56 @@ def _diff(old: dict, cur: dict) -> list[dict]:
     return out
 
 
+def _comp_state(verdict: Optional[str], our: Optional[int], vendor: Optional[int]) -> str:
+    """경과·경쟁 점수용 상태 — cheapest 는 경쟁가와 차이가 CLOSE_GAP_PCT 안이면 cheapest_close."""
+    if verdict == "cheapest" and our and vendor is not None and (vendor - our) / our * 100 <= W.CLOSE_GAP_PCT:
+        return "cheapest_close"
+    return verdict or "unchecked"
+
+
+def score_of(reasons: list[dict], verdict: Optional[str], checked: Optional[datetime], now: datetime, sales_n: int,
+             c: Optional[dict], our: Optional[int]) -> tuple[float, dict]:
+    """점수와 내역 {reason, aging, sales, competition, total, note}."""
+    notes = []
+    # 1) 사유 — 묶음별 한 번만, 가장 큰 값 + 나머지 절반
+    cats: dict[str, int] = {}
+    for r in reasons:
+        cat = W.REASON_CATEGORY.get(r["code"])
+        if cat:
+            cats[cat] = W.REASON_POINTS[cat]
+    pts = sorted(cats.items(), key=lambda kv: -kv[1])
+    reason = (pts[0][1] + sum(v for _, v in pts[1:]) * W.REASON_EXTRA_RATIO) if pts else 0
+    if pts:
+        notes.append("사유 " + " + ".join(f"{k} {v}" if i == 0 else f"{k} {v}½" for i, (k, v) in enumerate(pts)))
+    # 2) 경과
+    state = _comp_state(verdict, our, c.get("vendor_price") if c else None)
+    aging = 0.0
+    if checked:
+        days = max(0.0, (now - checked).total_seconds() / 86400)
+        per = W.AGING_PER_DAY.get(state, 1)
+        aging = round(days * per, 1)
+        notes.append(f"경과 {days:.1f}일×{per}")
+    # 3) 매출
+    sales = min(W.SALES_MAX, sales_n * W.SALES_PER_ORDER)
+    if sales_n:
+        notes.append(f"{W.SALES_DAYS}일 주문 {sales_n}건")
+    # 4) 경쟁
+    comp = W.COMPETITION_POINTS.get(state, 0)
+    if comp:
+        notes.append(f"{state} {comp}")
+    if c and c.get("status") == "found":
+        prices = [h.get("vendor_price") for h in (c.get("history") or [])[:W.COMP_HISTORY_WINDOW] if h.get("vendor_price") is not None]
+        if len(set(prices)) > 1:
+            comp += W.COMP_PRICE_MOVED
+            notes.append(f"경쟁가 변동 +{W.COMP_PRICE_MOVED}")
+        if c.get("vendor_type") == "agency":
+            comp += W.COMP_AGENCY
+            notes.append(f"구매대행 +{W.COMP_AGENCY}")
+    total = round(reason + aging + sales + comp, 1)
+    return total, {"reason": round(reason, 1), "aging": aging, "sales": sales, "competition": comp, "total": total,
+                   "note": " · ".join(notes)}
+
+
 async def queue(platform: str, limit: int = 40, include_skipped: bool = False) -> dict:
     now = datetime.now(timezone.utc)
     today = now.astimezone(KST).date()
@@ -77,10 +129,10 @@ async def queue(platform: str, limit: int = 40, include_skipped: bool = False) -
     # 손으로 적은 설정 — (제품, 옵션) 우선, 없으면 (제품, 전체)
     watches = {(w.product_id, w.option_id): w for w in await CompetitorWatch.filter(platform=platform, product_id__in=pids)}
 
-    # 최근 주문 (그 마켓, 시험 · 취소 제외)
+    # 최근 주문 (그 마켓, 시험 제외) — 매출 점수(30일)와 '주문 들어옴' 사유(취소 제외)
     orders: dict[int, list] = {}
-    for o in await MarketOrder.filter(market=platform, is_test=False, ordered_at__gte=now - timedelta(days=ORDER_LOOKBACK_DAYS)).exclude(
-            stage="cancelled").values("code", "seller_code", "ordered_at"):
+    for o in await MarketOrder.filter(market=platform, is_test=False, ordered_at__gte=now - timedelta(days=W.SALES_DAYS)).values(
+            "code", "seller_code", "ordered_at", "stage"):
         m = CODE_RE.search(o["seller_code"] or "")
         pid = code_to_pid.get(m.group(1)) if m else None
         if pid:
@@ -113,7 +165,8 @@ async def queue(platform: str, limit: int = 40, include_skipped: bool = False) -
             if not c or not checked:
                 reasons.append({"code": "new", "label": "확인 전", "detail": "신규 제품 · 옵션"})
             else:
-                fresh = [o for o in orders.get(pid, []) if o["ordered_at"] and o["ordered_at"] > checked]
+                fresh = [o for o in orders.get(pid, [])
+                         if o["ordered_at"] and o["ordered_at"] > checked and o["stage"] != "cancelled"]
                 if fresh and now - checked > timedelta(hours=ORDER_FRESH_HOURS):
                     last = max(fresh, key=lambda o: o["ordered_at"])
                     reasons.append({"code": "order", "label": "주문 들어옴",
@@ -148,11 +201,21 @@ async def queue(platform: str, limit: int = 40, include_skipped: bool = False) -
                      else "stale")
             if group == "stale":
                 reasons.append({"code": "stale", "label": "오래된 순", "detail": _fmt(checked) or ""})
-            skip = bool(w and w.skip_until and w.skip_until >= today and RANK[group] >= RANK["retry"])
-            if skip and not include_skipped:
+            new_reason = any(r["code"] not in ("retry", "watch", "stale") for r in reasons)
+            # 보류는 새 사유(주문 · 수정 · 신규 · 표시)가 없을 때만 — 보류 뒤에 판매가가 바뀌면 다시 올라온다
+            excluded = ("skip" if w and w.skip_until and w.skip_until >= today and not new_reason
+                        else "user_check" if w and w.needs_user_check
+                        else "fresh" if checked and now - checked < timedelta(hours=W.FRESH_HOURS) and not new_reason
+                        else None)
+            skip = excluded is not None
+            if skip:
                 skipped += 1
-                continue
+                if not include_skipped:
+                    continue
+            score, breakdown = score_of(reasons, ch.get("verdict"), checked, now, len(orders.get(pid, [])), c,
+                                        ch.get("our_price"))
             items.append({
+                "score": score, "score_breakdown": breakdown, "excluded": excluded,
                 "rank": RANK[group], "group": group, "group_label": LABEL[group], "reasons": reasons,
                 "product_id": pid, "code": p["code"], "title": p["title"], "platform": platform,
                 "option_id": ch.get("option_id"), "option": ch.get("option"), "competitor_id": c.get("id") if c else None,
@@ -166,17 +229,17 @@ async def queue(platform: str, limit: int = 40, include_skipped: bool = False) -
                 "our_price": ch.get("our_price"), "min_price": ch.get("min_price"),
                 "vendor_name": c.get("vendor_name") if c else None, "vendor_price": c.get("vendor_price") if c else None,
                 "vendor_ref": c.get("vendor_ref") if c else None,
-                "_sort": (RANK[group],
-                          -(max((o["ordered_at"] for o in orders.get(pid, [])), default=now).timestamp()) if group == "order" else 0,
-                          checked.timestamp() if checked else 0, pid),
+                "_sort": (1 if skip else 0, -score, checked.timestamp() if checked else 0, pid),
             })
     items.sort(key=lambda x: x["_sort"])
     counts: dict[str, int] = {}
     for it in items:
-        counts[it["group"]] = counts.get(it["group"], 0) + 1
+        if not it["excluded"]:
+            counts[it["group"]] = counts.get(it["group"], 0) + 1
         it.pop("_sort", None)
-    return {"platform": platform, "generated_at": _fmt(now), "total": len(items), "skipped": skipped, "counts": counts,
-            "order": list(RANK), "items": items[:limit]}
+    active = sum(1 for it in items if not it["excluded"])
+    return {"platform": platform, "generated_at": _fmt(now), "total": active, "skipped": skipped, "counts": counts,
+            "sort": "score", "order": list(RANK), "items": items[:limit]}
 
 
 async def watch_list(platform: Optional[str] = None) -> list[dict]:
