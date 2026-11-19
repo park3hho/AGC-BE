@@ -25,7 +25,31 @@ class CompetitorPrice(BaseModel):
     query = fields.CharField(max_length=100, null=True)              # 쓴 검색어
     checked_at = fields.DatetimeField(null=True)
     history = fields.JSONField(default=list)                         # [{at, vendor_name, vendor_price, vendor_type, status}] 최근 30회
-
+    # 확인할 때의 우리 쪽 값 (2026-11-19 확인 대기열) — {our_price, survey_cny, buy_cny, ship_cny, option, title}
+    #   지금 값과 다르면 대기열에 '바뀜'으로 다시 올라온다. 다음 저장 때 새 값으로 바뀌어 저절로 풀린다
+    basis = fields.JSONField(null=True)
+    vendor_ref = fields.JSONField(null=True)                         # 판매자 상품 식별 캐시 (예: 쿠팡 {productId, vendorItemId}, 네이버 {channelProductNo})
     class Meta:
         table = "competitor_price"
+        unique_together = (("product", "platform", "option"),)
+
+
+class CompetitorWatch(BaseModel):
+    """최저가 경쟁 점검 설정 1건 = 제품 × 판매처 (× 옵션, 비우면 제품 전체) (2026-11-19).
+    점검 루틴이 세션 메모에 들고 다니던 것을 DB 로 — 검색어 지정 · 검색 메모 · 사람 확인 필요 · 재확인 보류 · 확인 필요 표시."""
+
+    product = fields.ForeignKeyField("models.Product", related_name="competitor_watches", on_delete=fields.CASCADE)
+    platform = fields.CharField(max_length=10)                       # coupang · naver
+    option = fields.ForeignKeyField("models.ProductOption", related_name="competitor_watches", null=True,
+                                    on_delete=fields.CASCADE)
+    query_override = fields.CharField(max_length=100, null=True)     # 이 검색어로 찾는다 (예: 385 '루이싱 동결건조 커피')
+    search_note = fields.CharField(max_length=200, null=True)        # 검색 요령 (예: "원기탄 플랫화이트로는 안 나옴")
+    user_note = fields.CharField(max_length=300, null=True)          # 사람이 봐야 할 것 (예: "네이버 444 무가당 여부 확인")
+    needs_user_check = fields.BooleanField(default=False)            # true = 같은 제품인지 등 사람 확인 필요 (대기열에 표시만)
+    skip_until = fields.DateField(null=True)                         # 이 날(KST)까지 재확인 · 오래된 순 · 검색 안 됨 재시도 건너뜀 (주문 · 바뀜 · 신규는 안 건너뜀)
+    flag_reason = fields.CharField(max_length=200, null=True)        # 손으로 '확인 필요' 표시한 사유
+    flagged_at = fields.DatetimeField(null=True)                     # 이 뒤에 확인 저장되면 표시가 풀린다
+
+    class Meta:
+        table = "competitor_watch"
         unique_together = (("product", "platform", "option"),)

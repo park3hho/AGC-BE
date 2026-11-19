@@ -12,7 +12,7 @@ from fastapi import HTTPException
 from core.pricing_config import Platform
 from models.order.order import MarketOrder
 from models.order.purchase import TaobaoPurchase
-from models.product.competitor import CompetitorPrice
+from models.product.competitor import CompetitorPrice, CompetitorWatch
 from models.product.listing import MarketListing
 from models.product.price_survey import PriceSurvey, ProductOption
 from models.product.pricing import OptionPrice, ProductPricing
@@ -51,16 +51,17 @@ def _comp_dict(c: Optional[CompetitorPrice]) -> Optional[dict]:
     return {"id": c.id, "status": c.status, "option_id": c.option_id, "vendor_name": c.vendor_name,
             "vendor_price": c.vendor_price, "vendor_shipping": c.vendor_shipping, "vendor_type": c.vendor_type,
             "vendor_note": c.vendor_note, "vendor_url": c.vendor_url, "query": c.query,
-            "checked_at": c.checked_at.isoformat() if c.checked_at else None, "history": c.history or []}
+            "checked_at": c.checked_at.isoformat() if c.checked_at else None, "history": c.history or [],
+            "basis": c.basis, "vendor_ref": c.vendor_ref}
 
 
 class CompetitorService:
     @staticmethod
-    async def list(platform: Optional[str] = None, q: Optional[str] = None) -> dict:
+    async def list(platform: Optional[str] = None, q: Optional[str] = None, pids: Optional[set] = None) -> dict:
         fx = Decimal(str(await ExchangeRateService.current_rate()))
         listed = await MarketListing.filter(platform__in=list(PLATFORMS)).values("product_id", "platform")
         listed_set = {(r["product_id"], str(r["platform"].value if hasattr(r["platform"], "value") else r["platform"])) for r in listed}
-        pids = sorted({p for p, _ in listed_set})
+        pids = sorted({p for p, _ in listed_set} & set(pids)) if pids is not None else sorted({p for p, _ in listed_set})
         qs = Product.filter(id__in=pids, deleted_at=None)
         if q:
             qs = qs.filter(title_ko__icontains=q.strip()) if not q.strip().upper().startswith("PR-") else qs.filter(code__icontains=q.strip())
@@ -145,14 +146,19 @@ class CompetitorService:
         return {"items": items, "counts": counts, "fx": str(fx), "margin_floor_pct": MARGIN_FLOOR_PCT}
 
     @staticmethod
-    async def upsert(body: CompetitorUpsert) -> dict:
+    async def upsert(body: CompetitorUpsert, basis: Optional[dict] = None) -> dict:
+        """basis = 확인할 때의 우리 쪽 값 (snapshots() 가 만든다) — 확인 대기열의 '바뀜' 판정 기준 (2026-11-19)."""
         if not await Product.filter(id=body.product_id).exists():
             raise HTTPException(status_code=404, detail="제품을 찾지 못했습니다.")
         if body.option_id and not await ProductOption.filter(id=body.option_id, product_id=body.product_id).exists():
             raise HTTPException(status_code=400, detail="이 제품의 옵션이 아닙니다.")
         at = body.checked_at or datetime.now(timezone.utc)
         c = await CompetitorPrice.get_or_none(product_id=body.product_id, platform=body.platform, option_id=body.option_id)
-        vals = body.model_dump(exclude={"product_id", "platform", "option_id", "checked_at"})
+        vals = body.model_dump(exclude={"product_id", "platform", "option_id", "checked_at", "vendor_ref"})
+        if basis is not None:
+            vals["basis"] = basis
+        if body.vendor_ref is not None:
+            vals["vendor_ref"] = body.vendor_ref
         if body.status != "found":
             vals.update(vendor_name=vals.get("vendor_name"), vendor_price=None if body.status == "not_found" else vals.get("vendor_price"))
         snap = {"at": at.isoformat(), "status": body.status, "vendor_name": body.vendor_name,
@@ -164,6 +170,9 @@ class CompetitorService:
         else:
             c = await CompetitorPrice.create(product_id=body.product_id, platform=body.platform, option_id=body.option_id,
                                              **vals, checked_at=at, history=[snap])
+        # 손으로 단 '확인 필요' 표시는 그 뒤에 확인되면 푼다
+        await CompetitorWatch.filter(product_id=body.product_id, platform=body.platform, flagged_at__lte=at).update(
+            flag_reason=None, flagged_at=None)
         return _comp_dict(c)
 
     @staticmethod
@@ -171,3 +180,27 @@ class CompetitorService:
         n = await CompetitorPrice.filter(id=cid).delete()
         if not n:
             raise HTTPException(status_code=404, detail="기록을 찾지 못했습니다.")
+
+
+def basis_of(check: dict, title: str) -> dict:
+    """list() 의 확인 1줄(calc 결과) → 저장할 기준값. 비교할 것만."""
+    return {"our_price": check.get("our_price"), "survey_cny": check.get("survey_cny"), "buy_cny": check.get("buy_cny"),
+            "ship_cny": check.get("ship_cny"), "option": check.get("option"), "title": title}
+
+
+async def snapshots(pids: set) -> dict:
+    """{(product_id, platform, option_id|None): 기준값} — option_id 가 None 인 확인은 대표(가장 싼) 옵션 기준."""
+    data = await CompetitorService.list(None, None, pids=pids)
+    out = {}
+    for row in data["items"]:
+        title = row["product"]["title"]
+        for pf, v in row["platforms"].items():
+            for ch in v["checks"]:
+                b = basis_of(ch, title)
+                out[(row["product"]["id"], pf, ch.get("option_id"))] = b
+                c = ch.get("competitor") or {}
+                if c and c.get("option_id") is None:
+                    out[(row["product"]["id"], pf, None)] = b
+            if (row["product"]["id"], pf, None) not in out:
+                out[(row["product"]["id"], pf, None)] = basis_of(v["main"], title)
+    return out
