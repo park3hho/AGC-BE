@@ -13,6 +13,7 @@ from core.response_utils import success
 from database import TORTOISE_ORM
 from services.pricing.exchange_rate_service import fx_auto_loop
 from services.order.order_service import order_poll_loop
+from services.ops.auto_loop import ops_auto_loop
 from routers import (
     import_decl,
     company_reminder,
@@ -57,10 +58,12 @@ async def lifespan(app: FastAPI):
         fx_task = asyncio.create_task(fx_auto_loop())
         # 주문 자동 수집 — ORDER_POLL_MINUTES=0(기본)이면 바로 끝난다 (주기는 나중에 정함)
         order_task = asyncio.create_task(order_poll_loop())
+        # 서버 자동 처리 (카드 대조 등) — OPS_AUTO_MINUTES(기본 10)마다, 0 이면 안 돎 (2026-11-19)
+        ops_task = asyncio.create_task(ops_auto_loop())
         try:
             yield
         finally:
-            for task in (fx_task, order_task):
+            for task in (fx_task, order_task, ops_task):
                 task.cancel()
                 with contextlib.suppress(asyncio.CancelledError):
                     await task
