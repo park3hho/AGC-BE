@@ -5,13 +5,13 @@
 확인 1줄 = 제품 × 판매처 × 비교 옵션 (competitor_price 1줄, 아직 없으면 대표 옵션).
 사유와 순서 (앞일수록 먼저):
   1 order       주문 들어옴 — 마지막 확인이 24시간보다 오래됐고 그 뒤에 그 마켓 주문이 들어온 제품
-  2 changed     바뀜 — 확인 때 기준값(basis)과 지금 값이 다름: 판매가 · 원가(조사가 · 실구매가 · 운임) · 옵션/상품명,
+  2 changed     수정 — 확인 때 기준값(basis)과 지금 값이 다름: 판매가 · 원가(조사가 · 실구매가 · 운임) · 옵션/상품명,
                 또는 그 뒤에 새 옵션 · 새 마켓 등록 · 손으로 단 '확인 필요' 표시
   3 new         확인 전 (신규 제품 · 옵션)
   4 retry       지난번 검색 안 됨(not_found) — 다시 찾기
   5 watch       lose · match — 경쟁자 가격 다시 보기
   6 stale       그 밖 — 오래된 순
-skip_until(보류)은 4~6 에만 적용 — 주문 · 바뀜 · 신규는 보류 중이어도 올라온다.
+skip_until(보류)은 4~6 에만 적용 — 주문 · 수정 · 신규는 보류 중이어도 올라온다.
 표시는 저장(bulk)하면 저절로 풀린다: 새 checked_at 과 새 기준값이 들어가므로 같은 사유가 다시 생기지 않는다."""
 
 import re
@@ -31,7 +31,7 @@ KST = timezone(timedelta(hours=9))
 ORDER_FRESH_HOURS = 24        # 마지막 확인이 이보다 오래됐을 때만 '주문 들어옴'
 ORDER_LOOKBACK_DAYS = 3       # 이 안에 들어온 주문만 본다
 RANK = {"order": 1, "changed": 2, "new": 3, "retry": 4, "watch": 5, "stale": 6}
-LABEL = {"order": "주문 들어옴", "changed": "바뀜", "new": "확인 전", "retry": "검색 안 됨 다시", "watch": "lose·match 재확인",
+LABEL = {"order": "주문 들어옴", "changed": "수정", "new": "확인 전", "retry": "검색 안 됨 다시", "watch": "lose·match 재확인",
          "stale": "오래된 순"}
 CODE_RE = re.compile(r"(PR-\d{6}-[0-9A-Z]{4})")
 
@@ -55,15 +55,15 @@ def _won(v) -> str:
 def _diff(old: dict, cur: dict) -> list[dict]:
     out = []
     if old.get("our_price") != cur.get("our_price") and cur.get("our_price") is not None:
-        out.append({"code": "price", "label": "판매가 바뀜", "detail": f"{_won(old.get('our_price'))} → {_won(cur.get('our_price'))}"})
+        out.append({"code": "price", "label": "판매가 수정", "detail": f"{_won(old.get('our_price'))} → {_won(cur.get('our_price'))}"})
     for k, name in (("buy_cny", "구매가"), ("survey_cny", "조사가"), ("ship_cny", "운임")):
         a, b = old.get(k), cur.get(k)
         if a is not None and b is not None and abs(float(a) - float(b)) >= 0.01:
-            out.append({"code": "cost", "label": "원가 바뀜", "detail": f"{name} ¥{float(a):g} → ¥{float(b):g}"})
+            out.append({"code": "cost", "label": "원가 수정", "detail": f"{name} ¥{float(a):g} → ¥{float(b):g}"})
     if old.get("option") and cur.get("option") and old["option"] != cur["option"]:
-        out.append({"code": "option", "label": "옵션 바뀜", "detail": f"{old['option']} → {cur['option']}"})
+        out.append({"code": "option", "label": "옵션 수정", "detail": f"{old['option']} → {cur['option']}"})
     if old.get("title") and cur.get("title") and old["title"] != cur["title"]:
-        out.append({"code": "title", "label": "상품명 바뀜", "detail": f"{old['title']} → {cur['title']}"})
+        out.append({"code": "title", "label": "상품명 수정", "detail": f"{old['title']} → {cur['title']}"})
     return out
 
 
