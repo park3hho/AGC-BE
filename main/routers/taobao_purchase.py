@@ -88,3 +88,49 @@ async def delete_purchase(purchase_id: int, auth=Depends(require_feature(Feature
         raise
     except Exception as e:
         raise _fail("삭제", e, purchase_id)
+
+
+# ---------------------------------------------------------------- 소포 (2026-11-19)
+# 판매처가 한 구매를 여러 소포로 나눠 보낸 경우. 소포가 기록돼 있으면 전부 입고돼야 구매가 '창고 입고'가 된다.
+from schemas.ops import PackageIn, PackagePatch   # noqa: E402
+from services.order import package_service   # noqa: E402
+
+
+@router.get("/{purchase_id}/packages")
+async def list_packages(purchase_id: int, auth=Depends(require_feature(Feature.ORDER))):
+    try:
+        return success(**await package_service.list_packages(purchase_id))
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise _fail("소포 목록", e, purchase_id)
+
+
+@router.post("/{purchase_id}/packages")
+async def add_package(purchase_id: int, body: PackageIn, auth=Depends(require_feature(Feature.ORDER))):
+    try:
+        return success(**await package_service.add(purchase_id, body.model_dump(), auth))
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise _fail("소포 추가", e, purchase_id)
+
+
+@router.patch("/packages/{package_id}")
+async def patch_package(package_id: int, body: PackagePatch, auth=Depends(require_feature(Feature.ORDER))):
+    try:
+        return success(**await package_service.patch(package_id, body.model_dump(exclude_unset=True), auth))
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise _fail("소포 수정", e)
+
+
+@router.delete("/packages/{package_id}")
+async def delete_package(package_id: int, auth=Depends(require_feature(Feature.ORDER))):
+    try:
+        return success(**await package_service.delete(package_id, auth))
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise _fail("소포 삭제", e)

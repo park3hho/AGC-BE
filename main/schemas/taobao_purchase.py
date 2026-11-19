@@ -4,7 +4,7 @@ from typing import Optional
 
 from pydantic import BaseModel, Field, field_validator
 
-from core.purchase_config import CHARGED_STATUS, CN_STATUS, PAY_CURRENCY, PAY_METHOD, PURCHASE_ITEMS_MAX
+from core.purchase_config import CHARGED_STATUS, CN_STATUS, PAY_CURRENCY, PAY_METHOD, PURCHASE_ITEMS_MAX, REFUND_STATUS
 from schemas.common import _clean_url
 
 
@@ -55,6 +55,28 @@ class _Common(BaseModel):
     cn_tracking_no: Optional[str] = Field(default=None, max_length=60)
     arrived_at: Optional[datetime] = None
     memo: Optional[str] = Field(default=None, max_length=2000)
+    # 30분 점검 상태 (2026-11-19) — 메모 태그 대신
+    cn_last_text: Optional[str] = Field(default=None, max_length=200)   # 마지막 물류 문구
+    package_count: Optional[int] = Field(default=None, ge=1, le=50)     # 판매처가 말한 소포 수
+    refund_status: Optional[str] = None                                 # none · requested · success · rejected
+    refund_no: Optional[str] = Field(default=None, max_length=40)
+    refund_cny: Optional[Decimal] = Field(default=None, ge=0, le=Decimal("9999999"), decimal_places=2)
+    refund_requested_at: Optional[datetime] = None
+    refund_done_at: Optional[datetime] = None
+
+    @field_validator("refund_status")
+    @classmethod
+    def known_refund(cls, v):
+        if v is None:
+            return "none"
+        if v not in REFUND_STATUS:
+            raise ValueError("환불 상태는 none · requested · success · rejected 중 하나예요.")
+        return v
+
+    @field_validator("cn_last_text", "refund_no")
+    @classmethod
+    def blank2(cls, v):
+        return _blank(v)
 
     @field_validator("pay_method")
     @classmethod

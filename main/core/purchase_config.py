@@ -14,9 +14,19 @@ PURCHASE_TRACKED = (
     "taobao_order_no", "shop_name", "item_url", "items", "paid_cny", "purchased_at", "purchased_by_id",
     "cn_status", "shipped_at", "cn_courier", "cn_tracking_no", "arrived_at", "status_source", "memo",
     "pay_method", "pay_currency", "pay_amount", "charged_krw", "charged_status", "charged_at", "charged_source",
+    "package_count", "refund_status", "refund_no", "refund_cny", "refund_requested_at", "refund_done_at",
 )
 
 PURCHASE_ITEMS_MAX = 30
+
+# 타오바오 환불(退款) 진행 — 2026-11-19 (메모 태그 대신)
+REFUND_STATUS = {
+    "none": "환불 없음",
+    "requested": "환불 신청 (판매자 응답 대기)",
+    "success": "환불 완료 (退款成功)",
+    "rejected": "환불 거절",
+}
+PACKAGE_STATUS = {"shipped": "운송 중", "arrived": "창고 입고", "problem": "문제"}
 
 # 실제 결제 — 결제수단 · 결제창 통화 · 청구 원화 확인 정도
 PAY_METHOD = {"card": "카드", "kakaopay": "카카오페이", "alipay": "알리페이", "other": "기타"}

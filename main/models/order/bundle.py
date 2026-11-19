@@ -21,6 +21,8 @@ class JiyunBundle(BaseModel):
     confirmed_at = fields.DatetimeField(null=True)
     paid_at = fields.DatetimeField(null=True)
     dispatched_at = fields.DatetimeField(null=True)
+    notified_at = fields.DatetimeField(null=True)                   # 집운 결제 안내를 보낸 때 — 메모 태그 '[집운결제 안내 …]' 대신 (2026-11-19)
+    notice_note = fields.CharField(max_length=300, null=True)       # 안내 내용 요약 (받는 곳 시·구, 置顶 여부 등)
     memo = fields.TextField(null=True)
 
     class Meta:

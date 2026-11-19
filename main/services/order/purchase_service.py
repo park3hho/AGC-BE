@@ -13,7 +13,7 @@ from tortoise.transactions import in_transaction
 
 from core.purchase_config import CN_STATUS, PURCHASE_TRACKED
 from models.order.order import MarketOrder
-from models.order.purchase import TaobaoPurchase
+from models.order.purchase import PurchasePackage, TaobaoPurchase
 from schemas.taobao_purchase import TaobaoPurchaseCreate, TaobaoPurchaseUpdate
 from services.order.order_service import actor_of, confirmed_at, log_event, refresh_order, restage
 
@@ -26,6 +26,8 @@ FIELD_LABEL = {
     "status_source": "상태 출처", "memo": "메모",
     "pay_method": "결제수단", "pay_currency": "결제 통화", "pay_amount": "결제 금액", "charged_krw": "실제 청구 원화",
     "charged_status": "청구 확인", "charged_at": "결제 일시", "charged_source": "확인한 곳",
+    "package_count": "소포 수", "refund_status": "환불 상태", "refund_no": "退款编号", "refund_cny": "환불 위안",
+    "refund_requested_at": "환불 신청", "refund_done_at": "환불 결과",
 }
 
 
@@ -64,8 +66,18 @@ async def purchase_dict(p: TaobaoPurchase) -> dict:
         "pay_amount": _plain(p.pay_amount) if p.pay_amount is not None else None,
         "charged_krw": p.charged_krw, "charged_status": p.charged_status, "charged_at": _iso(p.charged_at),
         "charged_source": p.charged_source,
+        "cn_last_text": p.cn_last_text, "package_count": p.package_count,
+        "refund_status": p.refund_status, "refund_no": p.refund_no,
+        "refund_cny": _plain(p.refund_cny) if p.refund_cny is not None else None,
+        "refund_requested_at": _iso(p.refund_requested_at), "refund_done_at": _iso(p.refund_done_at),
+        "packages": [_package_dict(k) for k in await PurchasePackage.filter(purchase_id=p.id).order_by("id")],
         "created_at": p.created_at.isoformat(), "updated_at": p.updated_at.isoformat(),
     }
+
+
+def _package_dict(k) -> dict:
+    from services.order.package_service import package_dict
+    return package_dict(k)
 
 
 def _snapshot(p: TaobaoPurchase) -> dict:
@@ -192,6 +204,20 @@ class TaobaoPurchaseService:
             if "taobao_order_no" in data:
                 await _check_no_free(data["taobao_order_no"], p.id, conn)
             _auto_times(data, p)
+            if data.get("cn_status") == "arrived" or "package_count" in data:   # 소포 일부만 입고면 창고 입고로 못 바꿈 (2026-11-19)
+                from services.order.package_service import gate
+                g = await gate(p, data.get("package_count", p.package_count))
+                if g["complete"] is False:
+                    if data.get("cn_status") == "arrived":
+                        raise HTTPException(status_code=409, detail=(
+                            f"소포 {g['arrived']}/{g['need']} 만 입고됐어요. 소포를 전부 입고로 기록해야 창고 입고가 돼요 "
+                            f"(POST /taobao-purchases/{p.id}/packages)."))
+                    if p.cn_status == "arrived" and "cn_status" not in data:   # 소포 수를 늘렸더니 덜 들어온 상태
+                        data["cn_status"], data["arrived_at"] = "shipped", None
+            if data.get("refund_status") == "requested" and not data.get("refund_requested_at") and not p.refund_requested_at:
+                data["refund_requested_at"] = datetime.now(timezone.utc)
+            if data.get("refund_status") in ("success", "rejected") and not data.get("refund_done_at") and not p.refund_done_at:
+                data["refund_done_at"] = datetime.now(timezone.utc)
             before = _snapshot(p)
             data["status_source"] = "manual"
             await p.update_from_dict(data).save(using_db=conn)
@@ -204,6 +230,12 @@ class TaobaoPurchaseService:
                 {"purchase_id": p.id, "changes": changes},
             )
         await restage(await MarketOrder.get(id=p.order_id), actor, "타오바오 구매 상태 변경")   # 취소·환불로 바뀌면 다시 접수
+        if "cn_status" in data or "package_count" in data:
+            try:
+                from services.order.bundle_service import recompute_for_order
+                await recompute_for_order(p.order_id)
+            except Exception:
+                pass
         fin_expense.kick()
         return await purchase_dict(p)
 

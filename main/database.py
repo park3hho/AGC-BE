@@ -26,7 +26,8 @@ TORTOISE_ORM = {
                 "models.order.import_decl",   # 수입식품 구매대행 수입신고 (2026-11-11)
                 "models.order.bundle",   # 집운 묶음 PRE_LP… — 받는 사람별 한 상자, 결제하면 LP 번호 (2026-11-16)
                 "models.order.stock",   # 집운 가용재고 — 취소됐지만 환불 못 받은 소포를 다음 같은 주문에 씀 (2026-11-18)
-                "models.order.measure",   # 옵션별 실측 — 보낸 상자의 무게·크기, 배송비 계산용 비공개 (2026-11-18)
+                "models.order.measure",
+                "models.ops.alert",   # AI·서버 알림 기록 — 같은 알림 두 번 안 보내기 (2026-11-19)   # 옵션별 실측 — 보낸 상자의 무게·크기, 배송비 계산용 비공개 (2026-11-18)
                 "aerich.models",
             ],
             "default_connection": "default",

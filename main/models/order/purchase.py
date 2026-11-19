@@ -39,6 +39,15 @@ class TaobaoPurchase(BaseModel):
     arrived_at = fields.DatetimeField(null=True)                    # 집운 창고 입고
     status_source = fields.CharField(max_length=10, default="manual")   # manual(사람·에이전트 입력) · poll(나중에 폴링이 채움)
     status_checked_at = fields.DatetimeField(null=True)             # 폴링이 마지막으로 확인한 때
+    cn_last_text = fields.CharField(max_length=200, null=True)      # 마지막으로 본 물류 문구 (예: "已安检待入库 08:53") — 점검이 메모 대신 여기 (2026-11-19)
+    package_count = fields.IntField(null=True)                      # 판매처가 나눠 보낸 소포 수 ("N个包裹") — 모르면 비움, 소포 기록(purchase_package) 수보다 크면 입고 덜 됨
+
+    # 환불 (타오바오 退款) — 메모 태그 '[退款 신청 …]' 대신 (2026-11-19)
+    refund_status = fields.CharField(max_length=12, default="none")   # core/purchase_config.REFUND_STATUS
+    refund_no = fields.CharField(max_length=40, null=True)          # 退款编号
+    refund_cny = fields.DecimalField(max_digits=12, decimal_places=2, null=True)
+    refund_requested_at = fields.DatetimeField(null=True)
+    refund_done_at = fields.DatetimeField(null=True)                # 退款成功 · 거절 확인 시각
 
     memo = fields.TextField(null=True)
     created_by = fields.ForeignKeyField(
@@ -48,3 +57,21 @@ class TaobaoPurchase(BaseModel):
 
     class Meta:
         table = "taobao_purchase"
+
+
+class PurchasePackage(BaseModel):
+    """판매처가 한 구매를 여러 소포로 나눠 보낸 경우의 소포 하나 (2026-11-19 — 첫 소포만 입고됐는데 집운 결제 안내된 사고 뒤).
+
+    소포가 하나라도 기록돼 있으면 구매의 창고 입고(cn_status=arrived)는 '모든 소포 입고 + package_count 이상'일 때만 된다."""
+
+    purchase = fields.ForeignKeyField("models.TaobaoPurchase", related_name="packages", on_delete=fields.CASCADE)
+    courier = fields.CharField(max_length=50, null=True)            # 중국 택배사
+    tracking_no = fields.CharField(max_length=60)                   # 중국 운송장
+    status = fields.CharField(max_length=12, default="shipped")     # shipped 운송 중 · arrived 창고 입고 · problem
+    shipped_at = fields.DatetimeField(null=True)
+    arrived_at = fields.DatetimeField(null=True)
+    last_text = fields.CharField(max_length=200, null=True)         # 마지막 물류 문구
+    memo = fields.CharField(max_length=300, null=True)
+
+    class Meta:
+        table = "purchase_package"

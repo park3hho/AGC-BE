@@ -64,6 +64,9 @@ class MarketOrder(BaseModel):
     settle_paid_on = fields.DateField(null=True)                    # 정산 완료일 — 네이버 settleCompleteDate
     # 테스트 주문 (사장 본인 시험 주문, 2026-11-04) — DB 에는 남기고 화면 목록·홈·알림에서는 뺀다. 목록 API 는 include_test=true 일 때만 같이 준다
     is_test = fields.BooleanField(default=False)
+    # 30분 점검 상태 — 루틴 메모 대신 DB 에 (2026-11-19)
+    delay_requested_at = fields.DatetimeField(null=True)            # 네이버 발송지연(OVERSEA_DELIVERY) 요청한 때 — 1회만 가능
+    deadline_stage = fields.CharField(max_length=6, null=True)      # 발송기한 알림을 마지막으로 보낸 단계 d3 · d1 · over (services/ops/deadline)
 
     class Meta:
         table = "market_order"
