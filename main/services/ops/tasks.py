@@ -273,8 +273,8 @@ async def compute(include_test: bool = False) -> dict:
 # 루틴은 회차 맨 앞에서 GET /ops/check-mode 를 부르고, full 일 때만 플레이북을 읽고 정식 점검을 한다.
 URGENT_TYPES = ("claim", "confirm", "naver_delay", "import_decl", "cancel_followup", "purchase",
                 "jiyun_pay_notice", "invoice")
-FULL_EVERY_H = 2          # 낮: 2시간마다 정식 점검 (서버가 모르는 브라우저 변화 — 타오바오 물류 · 집운 입고 · 사용자 집운 결제 · 유니패스 처리현황)
-NIGHT = range(1, 8)       # 01~07시: 01·03·05·07시 정식 점검만, 나머지 회차는 건너뜀
+DAILY_FULL_H = 22        # 강제 정식 점검은 하루 한 번 22시 첫 회차 (사용자 11-19 "하루 한 번, 밤에") — 서버가 모르는 브라우저 변화 확인
+NIGHT = range(1, 8)       # 01~07시: 할 일 없으면 skip (idle 과 같음, 표시만 다름)
 
 
 async def check_mode(now: datetime | None = None) -> dict:
@@ -305,17 +305,17 @@ async def check_mode(now: datetime | None = None) -> dict:
         reasons.append(f"새 주문 {new_orders}")
     if new_claims:
         reasons.append(f"새 클레임 {new_claims}")
+    sent_decl = await ImportDeclaration.filter(deleted_at=None, status="sent").count()   # 전송 뒤 접수 전 — 오류통보는 통관 전에 고쳐야 함
     if reasons:
         mode = "full"
+    elif k.hour == DAILY_FULL_H and k.minute < 30:
+        mode, reasons = "full", [f"하루 한 번 정식 점검 ({DAILY_FULL_H}시, 브라우저로만 보이는 변화 확인)"]
+    elif (t["counts"].get("jiyun_pay_wait") or t["counts"].get("dispatch_check") or sent_decl) and k.minute < 30:
+        why = [w for w, n in (("집운 결제 대기", t["counts"].get("jiyun_pay_wait")), ("출고 대기", t["counts"].get("dispatch_check")),
+                               ("수입신고 접수 전", sent_decl)) if n]
+        mode, reasons = "full", [" · ".join(why) + " 있음 → 매시 첫 회차 확인"]
     elif k.hour in NIGHT:
-        if k.hour % 2 == 1 and k.minute < 30:
-            mode, reasons = "full", ["밤 2시간 정식 점검 (01·03·05·07시)"]
-        else:
-            mode, reasons = "skip", ["밤 쉬는 회차 (01~08시는 2시간 간격)"]
-    elif k.hour % FULL_EVERY_H == 0 and k.minute < 30:
-        mode, reasons = "full", [f"{FULL_EVERY_H}시간 정식 점검 (브라우저로만 보이는 변화 확인)"]
-    elif (t["counts"].get("jiyun_pay_wait") or t["counts"].get("dispatch_check")) and k.minute < 30:
-        mode, reasons = "full", ["집운 결제 대기 · 출고 대기 있음 → 1시간마다 확인 (결제 받는 곳 · 출고 즉시 송장)"]
+        mode, reasons = "skip", ["밤 회차 — 할 일 없음"]
     else:
         mode, reasons = "idle", ["할 일 · 새 주문 · 클레임 · 안 전한 알림 없음"]
     return {"mode": mode, "reasons": reasons, "at": now.isoformat(), "kst": k.strftime("%m-%d %H:%M"),
