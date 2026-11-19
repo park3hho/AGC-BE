@@ -20,6 +20,7 @@ TASK_TYPE = {
     "import_status": ("수입신고 처리 확인", "action", 35),
     "cancel_followup": ("취소 뒤 환불·재고", "action", 40),
     "purchase": ("타오바오 구매", "action", 50),
+    "jiyun_record": ("사용자 집운 결제 기록", "action", 55),
     "jiyun_pay_notice": ("집운 결제 안내", "action", 60),
     "invoice": ("송장 → 마켓 발송처리", "action", 70),
     "deadline": ("발송기한", "action", 75),

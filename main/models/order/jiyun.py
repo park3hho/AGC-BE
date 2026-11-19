@@ -46,3 +46,31 @@ class JiyunShipment(BaseModel):
 
     class Meta:
         table = "jiyun_shipment"
+
+
+class JiyunTrade(BaseModel):
+    """타오바오 집운 주문(결제 후) 마지막 상태 — 결제용 계정의 집운 목록 JSON 을 루틴이 받아 /ops/jiyun-sync 로 넘긴다 (2026-11-19).
+
+    서버가 이걸로 출고(已出库) · 새 물류번호(B/L) · 사용자 집운 결제(우리 기록 없음) · 받는 곳 일치를 판단한다.
+    받는 사람 원본(이름·주소·전화)은 저장하지 않는다 — 일치 결과만."""
+
+    trade_id = fields.CharField(max_length=40, unique=True)          # 집운 결제 주문번호 (orderNum · tradeId)
+    lp_no = fields.CharField(max_length=60, null=True, index=True)   # LP… (상세에서)
+    status_code = fields.CharField(max_length=10, null=True)
+    status_desc = fields.CharField(max_length=40, null=True)         # 已出库 · 等待仓库出库 · 等待仓库拣货 …
+    status_detail = fields.CharField(max_length=200, null=True)
+    package_count = fields.IntField(null=True)
+    fee_cny = fields.DecimalField(max_digits=10, decimal_places=2, null=True)
+    weight_kg = fields.DecimalField(max_digits=8, decimal_places=2, null=True)
+    created_on = fields.DateField(null=True)                         # 집운 결제일 (createTimeStr)
+    mail_nos = fields.JSONField(default=list)                        # 출고 뒤 새 물류번호 (= 국제 운송장 H B/L)
+    first_orders = fields.JSONField(default=list)                    # 묶인 타오바오 구매 주문번호
+    dispatched_at = fields.DatetimeField(null=True)                  # 트레이스 '包裹已出库' 시각
+    receiver_check = fields.CharField(max_length=10, null=True)      # match · mismatch · unknown
+    receiver_note = fields.CharField(max_length=200, null=True)      # 가린 비교 결과 (예: "이름 일치 · 성북구 일치")
+    seen_at = fields.DatetimeField(null=True)                        # 마지막으로 목록에서 본 때
+    status_changed_at = fields.DatetimeField(null=True)
+    detail_at = fields.DatetimeField(null=True)                      # 상세를 마지막으로 받은 때
+
+    class Meta:
+        table = "jiyun_trade"

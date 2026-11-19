@@ -196,6 +196,24 @@ async def compute(include_test: bool = False) -> dict:
                                        f"{k.courier or ''} {k.tracking_no} · 첫 집운 {', '.join(j.jiyun_no for j in jy[o.id])} · 안내하면 알림 key {key}"
                                        + (f" · {k.memo}" if k.memo else ""), target=tgt))
 
+    # 8-4) 사용자가 결제한 집운인데 우리 기록 없음 (집운 동기화 jiyun_trade 기준)
+    try:
+        from services.ops.jiyun_sync import unrecorded
+        for tr in await unrecorded():
+            buys = await TaobaoPurchase.filter(deleted_at=None, taobao_order_no__in=tr.first_orders or ["-"]).prefetch_related("order")
+            os_ = []
+            for p in buys:
+                if p.order and p.order not in os_:
+                    os_.append(p.order)
+            if os_ and all(o.is_test for o in os_) and not include_test:
+                continue
+            chk = {"match": "받는 곳 일치", "mismatch": "받는 곳 불일치 의심 — 바로 확인", "unknown": "받는 곳 확인 못 함"}.get(tr.receiver_check or "", "받는 곳 확인 전")
+            items.append(_task("jiyun_record", os_, f"집운 결제 {tr.created_on} · {tr.status_desc or ''} · {chk}",
+                               f"{tr.lp_no} · 결제주문 {tr.trade_id} · ¥{tr.fee_cny or '-'} · {tr.weight_kg or '-'}kg → POST /jiyun-shipments(/bundle) + 영수증·실측",
+                               target={"kind": "jiyun_trade", "id": tr.id, "code": tr.lp_no}))
+    except Exception as e:
+        items.append(_task("jiyun_record", [], "집운 결제 기록 대조 실패", f"{type(e).__name__}", target={"kind": "jiyun_trade", "id": None, "code": None}))
+
     # 8-3) 열린 클레임 알림 (서버 자동 감지 auto:claims — 쿠팡 RU·UC·CC 미처리)
     for a in await AgentAlert.filter(kind="claim", resolved_at=None, source__startswith="auto:").order_by("first_at"):
         os_ = [o for o in await MarketOrder.filter(code__in=a.order_codes or [])] if a.order_codes else []
@@ -272,7 +290,7 @@ async def compute(include_test: bool = False) -> dict:
 # ------------------------------------------------------------ 회차 모드 (비용 줄이기, 2026-11-19 Manager2·사용자 "ㅇㅋ")
 # 루틴은 회차 맨 앞에서 GET /ops/check-mode 를 부르고, full 일 때만 플레이북을 읽고 정식 점검을 한다.
 URGENT_TYPES = ("claim", "confirm", "naver_delay", "import_decl", "cancel_followup", "purchase",
-                "jiyun_pay_notice", "invoice")
+                "jiyun_pay_notice", "invoice", "jiyun_record")
 RUN_EVERY_MIN = 45       # 루틴 간격 (11-19 사용자 "45분 단위", 00:00 기준 격자 00:00·00:45·01:30 …)
 NEW_WINDOW_MIN = 55      # 새 주문·클레임을 full 로 잡는 창 — 회차 간격(45분)보다 넉넉히
 DAILY_FULL_H = 4         # 강제 정식 점검은 하루 한 번 04:30 회차 (사용자 11-19 정정) — 04:00 주문 놓침 점검(risk 알림) 바로 뒤, 서버가 모르는 브라우저 변화 확인

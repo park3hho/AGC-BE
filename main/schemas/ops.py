@@ -71,3 +71,10 @@ class BundleNoticeIn(BaseModel):
     note: Optional[str] = Field(default=None, max_length=300)
     notified_at: Optional[datetime] = None       # 비우면 지금
     clear: bool = False                          # true 면 안내 표시 지우기
+
+
+class JiyunSyncIn(BaseModel):
+    """결제용 타오바오 탭에서 받은 집운 JSON 그대로 (consolidationOrderList.json 의 data.secondConsoOrders, orderDetail.json 의 data)."""
+    orders: list[dict] = Field(default_factory=list, max_length=200)
+    details: dict[str, dict] = Field(default_factory=dict)       # {tradeId: orderDetail data}
+    traces: dict[str, str] = Field(default_factory=dict)         # {tradeId: trace_detail.htm 글자}

@@ -15,7 +15,7 @@ from core.permissions import Feature
 from core.response_utils import success
 from models.order.bundle import JiyunBundle
 from models.order.order import MarketOrder
-from schemas.ops import AlertIn, AlertPatch, BundleNoticeIn, OrderMarkIn
+from schemas.ops import AlertIn, AlertPatch, BundleNoticeIn, JiyunSyncIn, OrderMarkIn
 from services.ops import alerts as alert_service
 from services.ops import tasks as task_service
 from services.ops.deadline import STAGES
@@ -63,6 +63,22 @@ async def get_check_mode(auth=Depends(require_ops)):
         raise
     except Exception as e:
         raise _fail("회차 모드 계산", e)
+
+
+@router.post("/jiyun-sync")
+async def jiyun_sync(body: JiyunSyncIn, auth=Depends(require_ops)):
+    """집운(결제 후) 동기화 — 루틴이 받은 집운 JSON 을 넘기면 서버가 출고 · 사용자 결제 · 받는 곳 일치를 판단 (2026-11-19).
+    응답에 받는 사람 원본은 없다."""
+    try:
+        from services.ops.jiyun_sync import sync
+        r = await sync(body.orders, body.details, body.traces, auth)
+        logger.info(f"집운 동기화: seen={r['seen']} dispatched={len(r['dispatched'])} new_paid={len(r['new_paid'])} "
+                    f"mismatch={len(r['mismatch'])} need_detail={len(r['need_detail'])} errors={len(r['errors'])}")
+        return success(**r)
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise _fail("집운 동기화", e)
 
 
 @router.post("/alerts")
