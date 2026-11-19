@@ -200,9 +200,9 @@ async def compute(include_test: bool = False) -> dict:
     try:
         from services.ops.jiyun_sync import unrecorded
         for tr in await unrecorded():
-            buys = await TaobaoPurchase.filter(deleted_at=None, taobao_order_no__in=tr.first_orders or ["-"]).prefetch_related("order")
+            tr_buys = await TaobaoPurchase.filter(deleted_at=None, taobao_order_no__in=tr.first_orders or ["-"]).prefetch_related("order")
             os_ = []
-            for p in buys:
+            for p in tr_buys:
                 if p.order and p.order not in os_:
                     os_.append(p.order)
             if os_ and all(o.is_test for o in os_) and not include_test:
