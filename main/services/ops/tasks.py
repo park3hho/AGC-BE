@@ -273,7 +273,7 @@ async def compute(include_test: bool = False) -> dict:
 # 루틴은 회차 맨 앞에서 GET /ops/check-mode 를 부르고, full 일 때만 플레이북을 읽고 정식 점검을 한다.
 URGENT_TYPES = ("claim", "confirm", "naver_delay", "import_decl", "cancel_followup", "purchase",
                 "jiyun_pay_notice", "invoice")
-DAILY_FULL_H = 22        # 강제 정식 점검은 하루 한 번 22시 첫 회차 (사용자 11-19 "하루 한 번, 밤에") — 서버가 모르는 브라우저 변화 확인
+DAILY_FULL_H = 4         # 강제 정식 점검은 하루 한 번 04:30 이후 첫 회차 = 04:46 (사용자 11-19 정정) — 04:00 주문 놓침 점검(risk 알림) 바로 뒤, 서버가 모르는 브라우저 변화 확인
 NIGHT = range(1, 8)       # 01~07시: 할 일 없으면 skip (idle 과 같음, 표시만 다름)
 
 
@@ -308,8 +308,8 @@ async def check_mode(now: datetime | None = None) -> dict:
     sent_decl = await ImportDeclaration.filter(deleted_at=None, status="sent").count()   # 전송 뒤 접수 전 — 오류통보는 통관 전에 고쳐야 함
     if reasons:
         mode = "full"
-    elif k.hour == DAILY_FULL_H and k.minute < 30:
-        mode, reasons = "full", [f"하루 한 번 정식 점검 ({DAILY_FULL_H}시, 브라우저로만 보이는 변화 확인)"]
+    elif k.hour == DAILY_FULL_H and k.minute >= 30:
+        mode, reasons = "full", ["하루 한 번 정식 점검 (04:30 이후 첫 회차, 브라우저로만 보이는 변화 확인)"]
     elif (t["counts"].get("jiyun_pay_wait") or t["counts"].get("dispatch_check") or sent_decl) and k.minute < 30:
         why = [w for w, n in (("집운 결제 대기", t["counts"].get("jiyun_pay_wait")), ("출고 대기", t["counts"].get("dispatch_check")),
                                ("수입신고 접수 전", sent_decl)) if n]
