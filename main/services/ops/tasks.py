@@ -267,3 +267,56 @@ async def compute(include_test: bool = False) -> dict:
     return {"generated_at": now.isoformat(), "total": len(items),
             "action": sum(1 for t in items if t["group"] == "action" and not t.get("alerted")),
             "counts": counts, "items": items}
+
+
+# ------------------------------------------------------------ 회차 모드 (비용 줄이기, 2026-11-19 Manager2·사용자 "ㅇㅋ")
+# 루틴은 회차 맨 앞에서 GET /ops/check-mode 를 부르고, full 일 때만 플레이북을 읽고 정식 점검을 한다.
+URGENT_TYPES = ("claim", "confirm", "naver_delay", "import_decl", "cancel_followup", "purchase",
+                "jiyun_pay_notice", "invoice")
+FULL_EVERY_H = 2          # 낮: 2시간마다 정식 점검 (서버가 모르는 브라우저 변화 — 타오바오 물류 · 집운 입고 · 사용자 집운 결제 · 유니패스 처리현황)
+NIGHT = range(1, 8)       # 01~07시: 01·03·05·07시 정식 점검만, 나머지 회차는 건너뜀
+
+
+async def check_mode(now: datetime | None = None) -> dict:
+    """full(정식 점검) · idle(할 일 없음, 메모 없이 끝) · skip(밤 쉬는 회차) 중 하나와 이유."""
+    from models.ops.alert import AgentAlert
+    now = now or datetime.now(timezone.utc)
+    k = now.astimezone(KST)
+    t = await compute(False)
+    reasons: list[str] = []
+    urgent = [x for x in t["items"] if x["type"] in URGENT_TYPES]
+    if t["counts"].get("stock_aging"):
+        keys = {f"stock_aging:{x['target']['id']}" for x in t["items"] if x["type"] == "stock_aging"}
+        seen = set(await AgentAlert.filter(key__in=list(keys)).values_list("key", flat=True))
+        urgent += [x for x in t["items"] if x["type"] == "stock_aging" and f"stock_aging:{x['target']['id']}" not in seen]
+    urgent += [x for x in t["items"] if x["type"] == "deadline" and not x.get("alerted")]
+    if urgent:
+        c: dict[str, int] = {}
+        for x in urgent:
+            c[x["type"]] = c.get(x["type"], 0) + 1
+        reasons.append("할 일 " + " · ".join(f"{TASK_TYPE[a][0]} {n}" for a, n in c.items()))
+    unrep = await AgentAlert.filter(reported_at=None, resolved_at=None).count()
+    if unrep:
+        reasons.append(f"안 전한 알림 {unrep}")
+    since = now - timedelta(minutes=40)
+    new_orders = await MarketOrder.filter(created_at__gte=since, is_test=False).count()
+    new_claims = await MarketOrder.filter(claim_at__gte=since, is_test=False).count()
+    if new_orders:
+        reasons.append(f"새 주문 {new_orders}")
+    if new_claims:
+        reasons.append(f"새 클레임 {new_claims}")
+    if reasons:
+        mode = "full"
+    elif k.hour in NIGHT:
+        if k.hour % 2 == 1 and k.minute < 30:
+            mode, reasons = "full", ["밤 2시간 정식 점검 (01·03·05·07시)"]
+        else:
+            mode, reasons = "skip", ["밤 쉬는 회차 (01~08시는 2시간 간격)"]
+    elif k.hour % FULL_EVERY_H == 0 and k.minute < 30:
+        mode, reasons = "full", [f"{FULL_EVERY_H}시간 정식 점검 (브라우저로만 보이는 변화 확인)"]
+    elif (t["counts"].get("jiyun_pay_wait") or t["counts"].get("dispatch_check")) and k.minute < 30:
+        mode, reasons = "full", ["집운 결제 대기 · 출고 대기 있음 → 1시간마다 확인 (결제 받는 곳 · 출고 즉시 송장)"]
+    else:
+        mode, reasons = "idle", ["할 일 · 새 주문 · 클레임 · 안 전한 알림 없음"]
+    return {"mode": mode, "reasons": reasons, "at": now.isoformat(), "kst": k.strftime("%m-%d %H:%M"),
+            "counts": t["counts"], "unreported": unrep, "new_orders": new_orders, "new_claims": new_claims}

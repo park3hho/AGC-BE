@@ -54,6 +54,17 @@ async def get_tasks(include_test: bool = Query(default=False), auth=Depends(requ
         raise _fail("할 일 계산", e)
 
 
+@router.get("/check-mode")
+async def get_check_mode(auth=Depends(require_ops)):
+    """30분 점검 회차 맨 앞 — full(정식 점검) · idle(할 일 없음) · skip(밤 쉬는 회차). 비용 줄이기 (2026-11-19)."""
+    try:
+        return success(**await task_service.check_mode())
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise _fail("회차 모드 계산", e)
+
+
 @router.post("/alerts")
 async def post_alert(body: AlertIn, auth=Depends(require_ops)):
     try:
