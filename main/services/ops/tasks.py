@@ -174,6 +174,34 @@ async def compute(include_test: bool = False) -> dict:
             items.append(_task("cn_track", b_orders, f"묶음 소포 {d['arrived']}/{d['total']} 입고 — 나머지 기다림",
                                ", ".join(partial) or None, target={"kind": "bundle", "id": b.id, "code": b.code}))
 
+    # 8-2) 남은 소포 — 주문에 집운 기록이 있는데, 어느 집운 packages 에도 안 들어간 입고 소포(두 번째 박스 등)
+    #      → 그 소포만 따로 집운 결제 안내 (11-19 Manager2 지적, OR-261117-0001). 안내했는지는 알림 key jiyun_pay_needed:package:{id}
+    from models.ops.alert import AgentAlert
+    for o in real:
+        if not jy.get(o.id):
+            continue
+        in_jy = {str(n).replace(" ", "") for j in jy[o.id] for n in (j.packages or [])}
+        for p in buys.get(o.id, []):
+            for k in await PurchasePackage.filter(purchase_id=p.id, status="arrived").order_by("id"):
+                if k.tracking_no in in_jy:
+                    continue
+                key = f"jiyun_pay_needed:package:{k.id}"
+                a = await AgentAlert.get_or_none(key=key)
+                tgt = {"kind": "package", "id": k.id, "code": k.tracking_no}
+                if a and a.reported_at:
+                    items.append(_task("jiyun_pay_wait", [o], f"남은 소포 안내함 {_kst(a.reported_at)} · 사용자 집운 결제 대기",
+                                       f"{k.courier or ''} {k.tracking_no}".strip(), target=tgt, since=_iso(a.reported_at)))
+                else:
+                    items.append(_task("jiyun_pay_notice", [o], "이 주문의 남은 소포 입고 → 그 소포만 따로 집운 결제 안내",
+                                       f"{k.courier or ''} {k.tracking_no} · 첫 집운 {', '.join(j.jiyun_no for j in jy[o.id])} · 안내하면 알림 key {key}"
+                                       + (f" · {k.memo}" if k.memo else ""), target=tgt))
+
+    # 8-3) 열린 클레임 알림 (서버 자동 감지 auto:claims — 쿠팡 RU·UC·CC 미처리)
+    for a in await AgentAlert.filter(kind="claim", resolved_at=None, source__startswith="auto:").order_by("first_at"):
+        os_ = [o for o in await MarketOrder.filter(code__in=a.order_codes or [])] if a.order_codes else []
+        items.append(_task("claim", os_, a.title, (a.body or "")[:300] or None,
+                           target={"kind": "alert", "id": a.id, "code": a.key}, since=_iso(a.first_at)))
+
     # 9) 중국 물류 확인 (판매처 발송 전 · 운송 중 구매) — 묶음 단위로 이미 넣은 주문은 건너뜀
     in_bundle_track = {i for t in items if t["type"] == "cn_track" for i in t["order_ids"]}
     for o in real:
