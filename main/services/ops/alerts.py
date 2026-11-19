@@ -21,12 +21,13 @@ def alert_dict(a: AgentAlert) -> dict:
         "level": a.level, "level_label": ALERT_LEVEL.get(a.level, a.level), "title": a.title, "body": a.body,
         "order_codes": a.order_codes or [], "target": a.target, "source": a.source, "count": a.count,
         "first_at": _iso(a.first_at), "last_at": _iso(a.last_at or a.first_at),
-        "resolved_at": _iso(a.resolved_at), "resolved_by": a.resolved_by,
+        "resolved_at": _iso(a.resolved_at), "resolved_by": a.resolved_by, "reported_at": _iso(a.reported_at),
     }
 
 
 async def raise_alert(key: str, kind: str, title: str, body: str | None = None, level: str = "info",
-                      order_codes: list | None = None, target: str | None = None, source: str | None = None) -> dict:
+                      order_codes: list | None = None, target: str | None = None, source: str | None = None,
+                      reported: bool = False) -> dict:
     """새 key 면 기록하고 new=True. 이미 열린 key 면 count+1 · last_at 만 갱신하고 new=False (내용은 처음 것 유지).
     resolved 된 key 면 다시 열고 new=True."""
     key = (key or "").strip()[:200]
@@ -45,6 +46,7 @@ async def raise_alert(key: str, kind: str, title: str, body: str | None = None, 
         return {"new": False, "alert": alert_dict(a)}
     vals = dict(kind=kind, level=level, title=title[:200], body=body, order_codes=list(order_codes or []),
                 target=(target or None) and str(target)[:60], source=(source or None) and str(source)[:60])
+    vals["reported_at"] = now if reported else None   # 루틴이 직접 보고하면 바로 ‘전함’, 서버 자동은 비워 둠
     if a:   # 해결됐던 것이 다시 생김
         await a.update_from_dict({**vals, "count": a.count + 1, "first_at": now, "last_at": now,
                                   "resolved_at": None, "resolved_by": None}).save()
@@ -53,8 +55,11 @@ async def raise_alert(key: str, kind: str, title: str, body: str | None = None, 
     return {"new": True, "alert": alert_dict(a)}
 
 
-async def list_alerts(kind: str | None, open_only: bool, since: datetime | None, q: str | None, limit: int) -> dict:
+async def list_alerts(kind: str | None, open_only: bool, since: datetime | None, q: str | None, limit: int,
+                      unreported: bool = False) -> dict:
     qs = AgentAlert.all()
+    if unreported:
+        qs = qs.filter(reported_at=None)
     if kind:
         qs = qs.filter(kind=kind)
     if open_only:
@@ -75,6 +80,15 @@ async def resolve(alert_id: int, resolved: bool, who: str | None) -> dict:
     a.resolved_at = datetime.now(timezone.utc) if resolved else None
     a.resolved_by = (who or None) if resolved else None
     await a.save(update_fields=["resolved_at", "resolved_by", "updated_at"])
+    return alert_dict(a)
+
+
+async def mark_reported(alert_id: int, reported: bool) -> dict:
+    a = await AgentAlert.get_or_none(id=alert_id)
+    if not a:
+        raise HTTPException(status_code=404, detail="알림을 찾지 못했어요.")
+    a.reported_at = datetime.now(timezone.utc) if reported else None
+    await a.save(update_fields=["reported_at", "updated_at"])
     return alert_dict(a)
 
 

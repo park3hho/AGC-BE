@@ -22,6 +22,7 @@ class AgentAlert(BaseModel):
     last_at = fields.DatetimeField(null=True)
     resolved_at = fields.DatetimeField(null=True)
     resolved_by = fields.CharField(max_length=60, null=True)
+    reported_at = fields.DatetimeField(null=True)                   # 사용자에게 전한 때 (루틴 보고 · 화면 확인) — 서버 자동 알림은 비어서 생기고 루틴이 전한 뒤 채움
 
     class Meta:
         table = "agent_alert"

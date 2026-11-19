@@ -58,7 +58,7 @@ async def get_tasks(include_test: bool = Query(default=False), auth=Depends(requ
 async def post_alert(body: AlertIn, auth=Depends(require_ops)):
     try:
         r = await alert_service.raise_alert(body.key, body.kind, body.title, body.body, body.level,
-                                            body.order_codes, body.target, body.source)
+                                            body.order_codes, body.target, body.source, body.reported)
         return success(**r)
     except HTTPException:
         raise
@@ -69,9 +69,10 @@ async def post_alert(body: AlertIn, auth=Depends(require_ops)):
 @router.get("/alerts")
 async def get_alerts(kind: Optional[str] = Query(default=None, max_length=30), open: bool = Query(default=False),
                      since: Optional[datetime] = Query(default=None), q: Optional[str] = Query(default=None, max_length=100),
+                     unreported: bool = Query(default=False),
                      limit: int = Query(default=100, ge=1, le=500), auth=Depends(require_ops)):
     try:
-        data = await alert_service.list_alerts(kind, open, since, q, limit)
+        data = await alert_service.list_alerts(kind, open, since, q, limit, unreported)
         return success(**data, kinds=ALERT_KIND, levels=ALERT_LEVEL)
     except HTTPException:
         raise
@@ -82,7 +83,14 @@ async def get_alerts(kind: Optional[str] = Query(default=None, max_length=30), o
 @router.patch("/alerts/{alert_id}")
 async def patch_alert(alert_id: int, body: AlertPatch, auth=Depends(require_ops)):
     try:
-        return success(alert=await alert_service.resolve(alert_id, body.resolved, _who(auth)))
+        if body.resolved is None and body.reported is None:
+            raise HTTPException(status_code=400, detail="resolved 또는 reported 를 보내 주세요.")
+        a = None
+        if body.reported is not None:
+            a = await alert_service.mark_reported(alert_id, body.reported)
+        if body.resolved is not None:
+            a = await alert_service.resolve(alert_id, body.resolved, _who(auth))
+        return success(alert=a)
     except HTTPException:
         raise
     except Exception as e:

@@ -20,10 +20,12 @@ class AlertIn(BaseModel):
     order_codes: list[str] = Field(default_factory=list, max_length=50)
     target: Optional[str] = Field(default=None, max_length=60)
     source: Optional[str] = Field(default=None, max_length=60)
+    reported: bool = False                       # 이 호출 뒤 바로 사용자에게 보고하면 true (new 일 때만 적용)
 
 
 class AlertPatch(BaseModel):
-    resolved: bool
+    resolved: Optional[bool] = None
+    reported: Optional[bool] = None
 
 
 class PackageIn(BaseModel):
