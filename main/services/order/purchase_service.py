@@ -189,6 +189,7 @@ class TaobaoPurchaseService:
         )
         await restage(order, actor, "타오바오 구매 기록")   # 구매 기록이 생기면 접수 → 처리
         fin_expense.kick()   # FIN 지출 원장으로 (2026-10-30)
+        __import__("services.order.alipay_ledger", fromlist=["kick"]).kick()   # 알리페이 잔액 선입선출 (2026-11-20)
         return await purchase_dict(p)
 
     @staticmethod
@@ -239,6 +240,7 @@ class TaobaoPurchaseService:
             except Exception:
                 pass
         fin_expense.kick()
+        __import__("services.order.alipay_ledger", fromlist=["kick"]).kick()   # 알리페이 잔액 선입선출 (2026-11-20)
         return await purchase_dict(p)
 
     @staticmethod
@@ -257,3 +259,4 @@ class TaobaoPurchaseService:
         )
         await restage(order, actor, "타오바오 구매 기록 삭제")   # 남은 구매 기록이 없으면 처리 → 접수
         fin_expense.kick()
+        __import__("services.order.alipay_ledger", fromlist=["kick"]).kick()   # 알리페이 잔액 선입선출 (2026-11-20)

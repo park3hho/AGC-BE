@@ -197,6 +197,7 @@ class JiyunService:
              "values": {k: v for k, v in snap.items() if v not in (None, [], "")}},
         )
         fin_expense.kick()   # FIN 지출 원장으로 (2026-10-30)
+        __import__("services.order.alipay_ledger", fromlist=["kick"]).kick()   # 알리페이 잔액 선입선출 (2026-11-20)
         await _bundle_sync(j.order_id)
         await _sync_domestic(j, auth)   # 국내 송장 → 국내 배송 기록 (2026-11-03)
         return await jiyun_dict(j)
@@ -231,6 +232,7 @@ class JiyunService:
                  "refs": _refs(j), "changes": changes},
             )
         fin_expense.kick()   # FIN 지출 원장으로 (2026-10-30)
+        __import__("services.order.alipay_ledger", fromlist=["kick"]).kick()   # 알리페이 잔액 선입선출 (2026-11-20)
         await _bundle_sync(j.order_id)
         await _sync_domestic(j, auth)   # 국내 송장 → 국내 배송 기록 (2026-11-03)
         return await jiyun_dict(j)
@@ -244,6 +246,7 @@ class JiyunService:
         j.deleted_at = datetime.now(timezone.utc)
         await j.save(update_fields=["deleted_at", "updated_at"])
         fin_expense.kick()
+        __import__("services.order.alipay_ledger", fromlist=["kick"]).kick()   # 알리페이 잔액 선입선출 (2026-11-20)
         await _bundle_sync(j.order_id)
         order = await MarketOrder.get(id=j.order_id)
         await log_event(order, actor, "jiyun_deleted", f"집운 {j.jiyun_no} 기록 삭제",
