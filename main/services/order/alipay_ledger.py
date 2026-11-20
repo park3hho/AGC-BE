@@ -228,3 +228,13 @@ async def delete_spend(sid: int) -> None:
     s.deleted_at = datetime.now(timezone.utc)
     await s.save(update_fields=["deleted_at", "updated_at"])
     await recompute(True)
+
+
+async def apply_now() -> None:
+    """구매 · 집운 저장 직후 같은 요청 안에서 바로 차감 (2026-11-20 사용자 '구조적으로 바로 차감').
+    응답에 선입선출 원화가 바로 담긴다. 실패해도 저장은 살리고 뒤에서 다시 시도."""
+    try:
+        await recompute(True)
+    except Exception as e:
+        logger.warning(f"알리페이 장부 즉시 계산 실패 → 뒤에서 다시: {e!r}")
+        kick()
