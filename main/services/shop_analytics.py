@@ -20,8 +20,14 @@ KST = timezone(timedelta(hours=9))
 #    한 번이라도 이 계정으로 로그인한 브라우저(visitor)는 로그인 전 기록까지 뺀다.
 INTERNAL_EMAIL_DOMAIN = "@eidofood.com"
 INTERNAL_MEMBER_IDS = (3,)   # 박찬호 (대표, 개인 메일 가입)
+# 로그인 없이 들어온 우리 기기 (사용자가 '나야' 확인한 방문). 앞으로는 SHOP 의 직원 기기 표시(?eido_staff=1)가 아예 안 보낸다
+INTERNAL_VISITORS = (
+    "2462481e-4ecc-42b9-951e-48ceb3b7bdc2",   # 2026-11-20 10:32 대표 휴대폰 (Gmail 앱 링크)
+)
 
-SOURCE_RULES = (   # (호스트에 들어 있으면, 이름)
+SOURCE_RULES = (   # (호스트에 들어 있으면, 이름) — 앞에서부터 먼저 맞는 것. 메일 · 앱 이름을 검색보다 먼저 (2026-11-20 Gmail 앱이 '구글'로 잡힘)
+    ("com.google.android.gm", "이메일"), ("mail.", "이메일"), ("outlook", "이메일"),
+    ("com.google.android.googlequicksearchbox", "구글"), ("com.nhn.android", "네이버"), ("com.kakao.talk", "카카오톡"),
     ("naver", "네이버"), ("google", "구글"), ("instagram", "인스타그램"), ("facebook", "페이스북"), ("fb.", "페이스북"),
     ("kakao", "카카오"), ("daum", "다음"), ("youtube", "유튜브"), ("youtu.be", "유튜브"), ("threads", "스레드"),
     ("t.co", "X(트위터)"), ("twitter", "X(트위터)"), ("x.com", "X(트위터)"), ("bing", "빙"), ("coupang", "쿠팡"),
@@ -97,7 +103,7 @@ async def summary(date_from: date | None, date_to: date | None, include_all: boo
         """select at, type, visitor, session, path, product_code, value, referrer, utm_source, landing, device, browser, os,
                   country, ip_hash, (member_id = any($3::int[])) as internal
            from shop.shop_event where at >= $1 and at < $2 order by at""", [start, end, internal_ids])
-    internal_visitors = {e["visitor"] for e in ev_all if e["internal"]}
+    internal_visitors = {e["visitor"] for e in ev_all if e["internal"] or e["visitor"] in INTERNAL_VISITORS}
     foreign_visitors = {e["visitor"] for e in ev_all if e["country"] and e["country"] != "KR"} - internal_visitors
     burst_visitors = _burst_visitors(ev_all) - internal_visitors - foreign_visitors
     if include_all:
@@ -289,7 +295,7 @@ async def digest(hours: int = 6) -> dict:
         """select at, type, visitor, session, path, product_code, referrer, utm_source, country, ip_hash, device, browser,
                   (member_id = any($2::int[])) as internal
            from shop.shop_event where at >= $1 order by at""", [since - timedelta(seconds=BURST_WINDOW_SEC), internal_ids])
-    internal_v = {e["visitor"] for e in ev_all if e["internal"]}
+    internal_v = {e["visitor"] for e in ev_all if e["internal"] or e["visitor"] in INTERNAL_VISITORS}
     burst_v = _burst_visitors(ev_all) - internal_v
     ev = [e for e in ev_all if e["at"] >= since]
     foreign_v = {e["visitor"] for e in ev if e["country"] and e["country"] != "KR"} - internal_v - burst_v
