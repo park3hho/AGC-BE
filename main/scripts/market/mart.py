@@ -162,7 +162,7 @@ def nv_category(title, category):
         return 50022479   # 식품>젤리/사탕/초콜릿>젤리
     if kind == "snack":
         t = title or ""
-        if re.search(r"말랭이|건과일", t): return 50002455   # 농산물>건과류>기타건과류
+        if re.search(r"말랭이|건과일", t): return 50022739   # 기타과자 (농산물>건과류는 인증정보 필수라 실패, 11-22)
         if re.search(r"케이크|파이", t): return 50022659       # 스낵/과자>파이/케익
         if re.search(r"쿠키|크래커|비스킷|샌드", t): return 50022679   # 쿠키/비스킷
         if re.search(r"페조이|포키|스틱", t): return 50022739     # 기타과자
