@@ -34,8 +34,8 @@ src = src.replace(anchor, inject, 1)
 src = src.replace('GENERIC = ["중국음료", "해외직구", "중국직구", "구매대행", "중국식품", "수입음료", "직구음료", "중국현지음료", "대륙음료", "중국편의점"]',
                   'GENERIC = ["중국과자", "중국간식", "해외직구", "중국직구", "구매대행", "중국식품", "수입과자", "직구과자", "대륙간식", "과자박스"]')
 assert "중국과자" in src
-assert "if str(cat) not in BEV_OK:" in src
-src = src.replace("if str(cat) not in BEV_OK:", "if False:")
+assert "if str(cat) not in BEV_OK" in src   # cp_new 에 별도형 조건(and not sep)이 붙어도 맞게 (2026-11-22)
+src = re.sub(r"if str\(cat\) not in BEV_OK[^:]*:", "if False:", src, count=1)
 old = '''_strip_cn0 = strip_cn
 def strip_cn(s):'''
 assert old in src
@@ -50,9 +50,9 @@ def _despec(s):
     s = re.sub(r"\s*\+\s*$", "", re.sub(r"\s{2,}", " ", s)).strip(" ·,/")
     return re.sub(r"\s{2,}", " ", s).strip()
 def _strip_cn1(s):''', 1)
-old = 'prow = (await q(conn, "select photos, category from product where id=$1", pid))[0]'
+old = 'prow = (await q(conn, "select photos, category, shipping_mode, title_ko from product where id=$1", pid))[0]'
 assert old in src
-src = src.replace(old, 'prow = (await q(conn, "select photo_url, photos, category from product where id=$1", pid))[0]')
+src = src.replace(old, 'prow = (await q(conn, "select photo_url, photos, category, shipping_mode, title_ko from product where id=$1", pid))[0]')
 old = 'photos = prow["photos"] if isinstance(prow["photos"], list) else json.loads(prow["photos"] or "[]")'
 assert old in src
 src = src.replace(old, old + '\n            photos = [prow["photo_url"]] + list(photos)')

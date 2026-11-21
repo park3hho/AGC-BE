@@ -172,6 +172,13 @@ async def main(args):
                     log(f"   POST {r.get('code')} spid={r.get('data')} {msg[:160]}")
                     if r.get("code") == "SUCCESS" and r.get("data"):
                         DONE.add(key); open("/private/market/cp_done.txt", "a").write(f"{key}|{r.get('data')}\n"); break
+                    if attempt == 0 and sep and "이미 등록된 상품과 중복" in msg and not body.get("brandId"):
+                        # 별도형 낱개가 박스 상품과 같은 바코드 — 바코드 없이 다시 (박스 상품은 무료배송이라 옵션으로 못 합침, 2026-11-22)
+                        log("   retry without barcode (GTIN 중복)")
+                        for it in body["items"]:
+                            it["barcode"] = ""; it["emptyBarcode"] = True; it["emptyBarcodeReason"] = "해외구매대행 상품"
+                            it["attributes"] = [a for a in it["attributes"] if a["attributeTypeName"] != "Global Trade Item Number"]
+                        continue
                     if attempt == 0 and body["brand"] and not body.get("brandId") and ("브랜드" in msg or "MPN/GTIN" in msg):
                         log("   retry without brand"); body["brand"] = ""; continue
                     break

@@ -46,7 +46,7 @@ cats = {412: 50022699, 413: 50022500, 414: 50022500, 415: 50022659, 416: 5002250
 src = src.replace('GUIDES = {}', 'GUIDES = {}\nCATBY_PID = ' + json.dumps({str(k): v for k, v in cats.items()}), 1)
 old = 'cat = int(CATBY.get(code) or ncat(code, prs[0]["flavor"])[0])'
 assert old in src
-src = src.replace(old, 'cat = int(CATBY_PID[str(pid)])')
+src = src.replace(old, 'cat = int(CATBY_PID.get(str(pid)) or CATBY.get(code) or ncat(code, prs[0][\"flavor\"])[0])')   # 새 제품(별도형 낱개)은 mart.nv_category 가 덮어씀
 old = 'want = [["맛", "용량", "수량"]] if need_flavor else'
 assert old in src
 src = src.replace(old, 'want = [["맛", "용량", "수량"], ["맛", "중량", "수량"]] if need_flavor else ([["용량", "수량"], ["중량", "수량"]] if not is_tea else None) or')
