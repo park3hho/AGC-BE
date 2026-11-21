@@ -25,6 +25,14 @@ class Product(BaseModel):
     category = fields.CharField(max_length=20, default="beverage")  # 대분류 beverage(음료) · tea(차, 우려 마시는)
     subcategory = fields.CharField(max_length=20, null=True)      # 소분류 — 대분류마다 정해진 값
     tea_form = fields.CharField(max_length=20, null=True)         # 형태 — 차만 (leaf 찻잎 · bag 티백 · coldbrew 냉침 티백 · powder 가루)
+    # 배송비 방식 (2026-11-20 사용자) — 쿠팡·네이버는 한 상품에 배송비 방식이 하나라 제품 단위
+    #   included 배송비 포함형(무료배송 · 박스/묶음 단위, 운임을 판매가에 포함) · separate 배송비 별도형(마트형 · 낱개, 배송비 9,900원 · 5만 원 이상 무료)
+    #   자동 분류: 낱개 계산 무게(실무게·부피무게 중 큰 값) 300g 이상 included, 미만 separate (services/product/shipping_mode.py)
+    shipping_mode = fields.CharField(max_length=10, null=True)
+    shipping_mode_source = fields.CharField(max_length=6, default="auto")   # auto(자동 분류가 바꿈) · manual(사람이 고름 — 자동이 덮어쓰지 않음)
+    unit_weight_g = fields.IntField(null=True)                      # 낱개 계산 무게 (g) — 대표 옵션 (무게 − 상자) ÷ 개수
+    unit_count = fields.IntField(null=True)                         # 대표 옵션의 개수 (×15병 → 15)
+    shipping_mode_note = fields.CharField(max_length=200, null=True)  # 계산 근거 (예: "망고맛 500ml×15병 · 7,500g÷15 = 500g")
     deleted_at = fields.DatetimeField(null=True)                  # 소프트 삭제 시각 — 값이 있으면 목록·상세에서 숨김
 
     class Meta:
