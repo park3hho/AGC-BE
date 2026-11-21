@@ -5,6 +5,8 @@ src = src.replace('json.load(open("/private/market/small_imgs.json"))', '[]').re
 exec(src.split("async def main(args):")[0])
 sys.argv = sys_argv
 from services.product.detail_export_service import jpeg_size, png_size
+sys.path.insert(0, "/app/scripts/market")
+import mart   # 배송비 별도형(낱개) — 9,900원 · 묶음배송 · 태그 (2026-11-21)
 
 _strip_cn0 = strip_cn
 def strip_cn(s):
@@ -72,7 +74,10 @@ async def main(args):
             log(f"  skip pid {pid} (already listed)"); continue
         try:
             prs = await build_products(conn, pid)
-            prow = (await q(conn, "select photos, category from product where id=$1", pid))[0]
+            prow = (await q(conn, "select photos, category, shipping_mode, title_ko from product where id=$1", pid))[0]
+            sep = mart.is_separate(prow)
+            if sep:
+                prs = [mart.fix_specs(pr) for pr in prs]
             photos = prow["photos"] if isinstance(prow["photos"], list) else json.loads(prow["photos"] or "[]")
             is_tea = prow["category"] == "tea"
         except Exception as e:
@@ -92,7 +97,7 @@ async def main(args):
                     cat, catname = 58874, "기타전통차류"
                 else:
                     cat, catname = await predict(pr["pname"])
-                    if str(cat) not in BEV_OK:
+                    if str(cat) not in BEV_OK and not sep:   # 별도형 낱개(원두·젤리 등)는 예측 카테고리 그대로
                         t = pr["title"]
                         if re.search(r"탄산|소다|콜라|스파클링|기포", t): cat, catname = 58768, "기타탄산음료"
                         elif re.search(r"전해질|스포츠|이온", t): cat, catname = 58770, "스포츠/이온음료"
@@ -119,6 +124,9 @@ async def main(args):
                                          {"attributeTypeName": "개당 수량", "attributeValueName": f"{sp['cnt']}개입"},
                                          {"attributeTypeName": "수량", "attributeValueName": f"{boxes}박스"}]
             tags = make_tags(pr, catname, is_tea)
+            if sep:
+                mart.cp_delivery(body)
+                tags = mart.tags(prow["title_ko"], pr["flavor"], prow["category"], 20)
             for it in body["items"]:
                 it["searchTags"] = tags
             if pr["brand"] in BRAND_IDS:
@@ -150,7 +158,7 @@ async def main(args):
                 if not keep:
                     log(f"   skip {key} (add-flavor: all options already listed)"); continue
             body["items"] = keep
-            log(f"== {key} {pr['pname']} | cat {cat} {catname} | tags {len(tags)} | " + str([(i['itemName'], i['salePrice'], i['externalVendorSku']) for i in body['items']]))
+            log(f"== {key} {pr['pname']} | cat {cat} {catname} | {'배송비 ' + str(body['deliveryCharge']) + ' 묶음' if sep else '무료배송'} | tags {len(tags)} {tags} | " + str([(i['itemName'], i['salePrice'], i['externalVendorSku']) for i in body['items']]))
             if dry:
                 json.dump(body, open(f"/private/market/cpnew_{pr['code']}.json", "w"), ensure_ascii=False); continue
             for attempt in range(2):
