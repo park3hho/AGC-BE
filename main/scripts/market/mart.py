@@ -12,6 +12,9 @@ import re
 SEPARATE_FEE = 9900
 NV_BUNDLE_GROUP = 57384202   # 네이버 '기본 배송비 묶음그룹' (MIN — 묶음 안에서 가장 작은 배송비 한 번)
 
+# 쿠팡이 상품명에서 브랜드를 감지해 brandId 를 요구하는 경우 (2026-11-21 UHA → '유하미카쿠토')
+CP_BRAND_IDS = {"UHA": "KR-65162"}
+
 # 브랜드 → 태그 (한글 표기 변형 · 병음 · 영문). 한자·남의 상표 금지
 BRAND_TAGS = {
     "차지": ["차지", "패왕차희", "바왕차지", "CHAGEE", "bawangchaji", "차지티백"],
@@ -100,6 +103,17 @@ def fix_specs(pr):
     if pr["specs"]:
         pr["pname"] = f"{pr['title']} {pr['specs'][0][2]}"[:100]
     return pr
+
+
+def to_jpg(path):
+    """네이버 이미지 업로드는 JPG·PNG·GIF·BMP 만 — webp 등은 JPG 로 바꿔 /tmp 에 둔다."""
+    if re.search(r"\.(jpe?g|png|gif|bmp)$", path, re.I):
+        return path
+    import os
+    from PIL import Image
+    out = "/tmp/nvimg_" + os.path.basename(path).rsplit(".", 1)[0] + ".jpg"
+    Image.open(path).convert("RGB").save(out, "JPEG", quality=92)
+    return out
 
 
 def cp_delivery(body):

@@ -126,6 +126,8 @@ async def main(args):
             tags = make_tags(pr, catname, is_tea)
             if sep:
                 mart.cp_delivery(body)
+                # 싼 낱개(젤리 2,800원 등)는 반품배송비가 판매가를 넘을 수 없다 (쿠팡 '0원 ~ 판매가')
+                body["returnCharge"] = min(body["returnCharge"], min(it["salePrice"] for it in body["items"]))
                 tags = mart.tags(prow["title_ko"], pr["flavor"], prow["category"], 20)
             for it in body["items"]:
                 it["searchTags"] = tags
@@ -158,6 +160,8 @@ async def main(args):
                 if not keep:
                     log(f"   skip {key} (add-flavor: all options already listed)"); continue
             body["items"] = keep
+            if sep and mart.CP_BRAND_IDS.get(pr["brand"]):   # 쿠팡이 브랜드를 감지해 brandId 를 요구하는 낱개 (UHA 등) — 바코드 없어도 올린다
+                body["brandId"] = mart.CP_BRAND_IDS[pr["brand"]]
             log(f"== {key} {pr['pname']} | cat {cat} {catname} | {'배송비 ' + str(body['deliveryCharge']) + ' 묶음' if sep else '무료배송'} | tags {len(tags)} {tags} | " + str([(i['itemName'], i['salePrice'], i['externalVendorSku']) for i in body['items']]))
             if dry:
                 json.dump(body, open(f"/private/market/cpnew_{pr['code']}.json", "w"), ensure_ascii=False); continue

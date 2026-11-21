@@ -104,7 +104,7 @@ async def build_group(conn, prs, flavors, cat, guide, is_tea, dry=False, per_fla
     seen = set()
     for fl, d in by_fl.items():
         p = d["pr"]
-        rep = "R" if dry else (await upload_images([local(rep_url(p["photo"]))]))[0]
+        rep = "R" if dry else (await upload_images([mart.to_jpg(local(rep_url(p["photo"])))]))[0]
         heavy_any = False
         for sp, total, name, r in sorted(d["specs"], key=lambda x: x[3]["sale_price"]):
             key = (strip_cn(fl), sp["amt"], sp["unit"], total)
