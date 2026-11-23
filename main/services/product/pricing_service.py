@@ -129,7 +129,8 @@ async def _bundles(product_id: int, options: list[ProductOption], product_code: 
     adopted = set(
         await ProductBundle.filter(option_id__in=list(by_id), deleted_at=None).values_list("option_id", "bundle_qty")
     )
-    suggested = {(o.id, n) for o, n in bundle_suggestions(options)}
+    # 10kg 묶음 제안은 음료만 (11-23: 규격 구조화 뒤 과자 1,020g×10·150팩×8 같은 큰 묶음이 제안돼 리서처 스크립트가 받아들임)
+    suggested = {(o.id, n) for o, n in bundle_suggestions(options)} if category == "beverage" else set()
     order = {o.id: i for i, o in enumerate(options)}
     keys = sorted(saved | suggested | adopted, key=lambda k: (order[k[0]], k[1]))
     return [
