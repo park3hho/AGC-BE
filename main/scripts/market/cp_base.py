@@ -64,6 +64,28 @@ def parse_spec(s):
     return {"amt": amt, "unit": UNIT[unit], "cnt": int(cnt), "word": word or "개"}
 
 
+from utils.option_spec import spec_dict as _spec_dict   # 규격 구조 칸 (2026-11-22)
+
+
+def option_spec(r):
+    """옵션 행 → (sp, 옵션 1개의 총 개수). product_option 구조 칸(unit_amount · total_count …)이 있으면 그것,
+    비어 있으면 예전처럼 parse_spec(option2). 구조 칸에서 온 sp 에는 "total" 이 있다 (mart.fix_specs 가 다시 세지 않게)."""
+    sp = _spec_dict(r)
+    if sp:
+        return sp, sp["total"]
+    sp = parse_spec(r.get("option2"))
+    return (sp, sp["cnt"]) if sp else (None, None)
+
+
+def spec_name(sp, total, r):
+    """아이템 이름 "3g×16티백". 섞인 구성(과일칩 4개입 + 티백 3g×8개)은 규격 글자 그대로 (+ 묶음이면 ×N)."""
+    if sp.get("mixed"):
+        bq = r.get("bundle_qty") or 1
+        name = re.sub(r"\s{2,}", " ", re.sub(r"[\u4e00-\u9fff]+", "", r.get("option2") or "")).strip()
+        return f"{name} ×{bq}" if bq > 1 else name
+    return f"{sp['amt']}{sp['unit']}×{total}{sp['word']}"
+
+
 def clean(v):
     v = re.sub(r"\[\[[^\]]*\]\]", "", v or "").strip(" ,·/")
     return v or "상품 상세페이지 참조"
@@ -161,7 +183,8 @@ async def build_products(conn, pid):
     if not ex:
         log(f"  ! {p['code']} no coupang export"); return []
     files = ex[0]["files"] if isinstance(ex[0]["files"], list) else json.loads(ex[0]["files"])
-    rows = await q(conn, """select o.id oid, o.option1, o.option2, o.photo_url, op.sale_price, op.bundle_qty
+    rows = await q(conn, """select o.id oid, o.option1, o.option2, o.photo_url, op.sale_price, op.bundle_qty,
+        o.unit_amount, o.unit, o.unit_count, o.count_word, o.pack_count, o.total_count
         from option_price op join product_pricing pp on pp.id=op.pricing_id join product_option o on o.id=op.option_id and o.deleted_at is null
         where pp.product_id=$1 and pp.platform='coupang' and op.sale_price is not null order by o.id, op.bundle_qty""", pid)
     im = {r.get("label", ""): (r.get("value") or "") for r in ((content.get("info") or {}).get("rows") or [])}
@@ -176,11 +199,11 @@ async def build_products(conn, pid):
     for flavor, rs in groups.items():
         specs = []
         for r in rs:
-            sp = parse_spec(r["option2"])
+            sp, per = option_spec(r)
             if not sp:
                 log(f"  ! {p['code']} spec parse fail: {r['option2']}"); continue
-            total = sp["cnt"] * (r["bundle_qty"] or 1)
-            specs.append((sp, total, f"{sp['amt']}{sp['unit']}×{total}{sp['word']}", r))
+            total = per * (r["bundle_qty"] or 1)
+            specs.append((sp, total, spec_name(sp, total, r), r))
         if not specs:
             continue
         # sort by total count
@@ -234,7 +257,7 @@ def payload(pr, cat_code, m, food_type):
                    "externalVendorSku": f"{pr['code']}-{r['oid']}" + (f"x{bq}" if bq > 1 else ""), "searchTags": tags,
                    "images": [{"imageOrder": 0, "imageType": "REPRESENTATION", "vendorPath": PUB + rep_url(pr["photo"])}],
                    "attributes": build_attrs(m, sp, total), "contents": contents,
-                   "notices": build_notices(m, pr["notice_title"], pr["im"], f"{sp['amt']}{sp['unit']} × {total}{sp['word']}", pr["content"], food_type)})
+                   "notices": build_notices(m, pr["notice_title"], pr["im"], name if sp.get("mixed") else f"{sp['amt']}{sp['unit']} × {total}{sp['word']}", pr["content"], food_type)})
         items.append(it)
     body["items"] = items
     return body

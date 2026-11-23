@@ -89,7 +89,8 @@ async def build(conn, pid):
     ex = await q(conn, "select files from detail_page_export where page_id=$1 and platform='naver' order by version desc limit 1", dp["id"])
     if not ex: nlog(f"  ! {p['code']} no naver export"); return []
     files = ex[0]["files"] if isinstance(ex[0]["files"], list) else json.loads(ex[0]["files"])
-    rows = await q(conn, """select o.id oid, o.option1, o.option2, o.photo_url, op.sale_price, op.bundle_qty
+    rows = await q(conn, """select o.id oid, o.option1, o.option2, o.photo_url, op.sale_price, op.bundle_qty,
+        o.unit_amount, o.unit, o.unit_count, o.count_word, o.pack_count, o.total_count
         from option_price op join product_pricing pp on pp.id=op.pricing_id join product_option o on o.id=op.option_id and o.deleted_at is null
         where pp.product_id=$1 and pp.platform='naver' and op.sale_price is not null order by o.id, op.bundle_qty""", pid)
     im = {r.get("label", ""): (r.get("value") or "") for r in ((content.get("info") or {}).get("rows") or [])}
@@ -102,10 +103,10 @@ async def build(conn, pid):
     for flavor_raw, rs in groups.items():
         specs = []
         for r in rs:
-            sp = parse_spec(r["option2"])
+            sp, per = option_spec(r)
             if not sp: nlog(f"  ! {p['code']} spec fail {r['option2']}"); continue
-            total = sp["cnt"] * (r["bundle_qty"] or 1)
-            specs.append((sp, total, f"{sp['amt']}{sp['unit']}×{total}{sp['word']}", r))
+            total = per * (r["bundle_qty"] or 1)
+            specs.append((sp, total, spec_name(sp, total, r), r))
         if not specs: continue
         # 같은 이름 규격 중복 제거 (싼 것 유지)
         seen = {}
@@ -155,7 +156,7 @@ def notice(pr, food_type):
         "productName": pr["notice_title"][:100], "foodType": food_type or "음료",
         "producer": mfr[:100], "location": clean(im.get("원산지") or "중국"),
         "packDateText": "제품 라벨 별도 표기", "consumptionDateText": (clean(im.get("소비기한")) + " (상세페이지 참조)")[:100],
-        "weight": " / ".join(f"{s['amt']}{s['unit']} × {t}{s['word']}" for s, t, _, _ in pr["specs"])[:100],
+        "weight": " / ".join(n if s.get("mixed") else f"{s['amt']}{s['unit']} × {t}{s['word']}" for s, t, n, _ in pr["specs"])[:100],
         "amount": " / ".join(f"{t}{s['word']}" for s, t, _, _ in pr["specs"])[:100],
         "ingredients": (clean(im.get("원재료")) + " (현지 라벨 기준, 상세페이지 참조)")[:1000],
         "nutritionFacts": nutrition_text(pr["content"])[:1000],

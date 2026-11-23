@@ -15,6 +15,7 @@ from decimal import Decimal
 from typing import Optional
 
 from models.product.price_survey import PriceSurveyPrice, ProductOption
+from utils.option_spec import spec_fields
 
 
 def norm_key(option1: Optional[str], option2: Optional[str]) -> tuple[str, str]:
@@ -52,7 +53,8 @@ async def match_options(product_id: int, items: list, conn, rename: bool = False
             next_sort += 1
             o = await ProductOption.create(product_id=product_id, price_cny=price, sort=next_sort, using_db=conn,
                                            option1=d["option1"], option2=d.get("option2"),
-                                           photo_url=d.get("photo_url"), barcode=d.get("barcode"))
+                                           photo_url=d.get("photo_url"), barcode=d.get("barcode"),
+                                           **spec_fields(d.get("option2")))   # 규격 구조 칸 자동 해석 (2026-11-22)
             by_key[norm_key(o.option1, o.option2)] = o
         else:
             changed = []
@@ -60,6 +62,10 @@ async def match_options(product_id: int, items: list, conn, rename: bool = False
                 if getattr(o, f) != d.get(f):
                     setattr(o, f, d.get(f))
                     changed.append(f)
+            if "option2" in changed and o.spec_source != "manual":   # 규격 글자가 바뀌면 구조 칸도 다시 해석
+                for k, v in spec_fields(o.option2).items():
+                    setattr(o, k, v)
+                    changed.append(k)
             for f in ("photo_url", "barcode"):
                 if d.get(f) is not None and getattr(o, f) != d.get(f):
                     setattr(o, f, d.get(f))
@@ -129,12 +135,17 @@ async def soft_delete(option_ids: list[int], conn) -> None:
     await CompetitorPrice.filter(option_id__in=option_ids).using_db(conn).update(option_id=None)
 
 
+SPEC_ATTRS = ("unit_amount", "unit", "unit_count", "count_word", "pack_count", "total_count",
+              "spec_note", "spec_checked", "spec_source")
+
+
 async def survey_options(survey_id: int) -> list[SimpleNamespace]:
     """조사 1건의 옵션 = 그 조사에서 본 가격 + 제품 옵션 정보 (지운 옵션은 뺀다). 응답 모양은 예전 그대로."""
     rows = await PriceSurveyPrice.filter(survey_id=survey_id, option__deleted_at=None).select_related("option")
     rows.sort(key=lambda r: (r.option.sort, r.option.id))
     return [
         SimpleNamespace(id=r.option.id, option1=r.option.option1, option2=r.option.option2, price_cny=r.price_cny,
-                        photo_url=r.option.photo_url, barcode=r.option.barcode)
+                        photo_url=r.option.photo_url, barcode=r.option.barcode,
+                        **{k: getattr(r.option, k) for k in SPEC_ATTRS})
         for r in rows
     ]

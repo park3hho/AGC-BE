@@ -11,6 +11,19 @@ def money_cny(v) -> Optional[str]:
     return format(Decimal(str(v)), ".2f")
 
 
+SPEC_KEYS = ("unit_amount", "unit", "unit_count", "count_word", "pack_count", "total_count",
+             "spec_note", "spec_checked", "spec_source")
+
+
+def option_spec_dict(o) -> dict:
+    """옵션 규격 구조 칸 (2026-11-22, utils/option_spec). unit_amount 는 문자열 ("3" · "2.8") — 소수 오차 방지."""
+    d = {k: getattr(o, k, None) for k in SPEC_KEYS}
+    if d["unit_amount"] is not None:
+        d["unit_amount"] = format(Decimal(str(d["unit_amount"])).normalize(), "f")
+    d["spec_checked"] = bool(d["spec_checked"])
+    return d
+
+
 def product_dict(p) -> dict:
     return {
         "id": p.id,
@@ -73,6 +86,7 @@ def survey_detail_dict(s, options) -> dict:
             {
                 "id": o.id, "option1": o.option1, "option2": o.option2,
                 "price_cny": money_cny(o.price_cny), "photo_url": o.photo_url, "barcode": o.barcode,
+                **option_spec_dict(o),
             }
             for o in options
         ],

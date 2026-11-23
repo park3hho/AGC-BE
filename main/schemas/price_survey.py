@@ -141,6 +141,39 @@ class PriceSurveyOptionPatch(BaseModel):
     option2: Optional[str] = Field(default=None, max_length=200)
     photo_url: Optional[str] = Field(default=None, max_length=1000)
     barcode: Optional[str] = Field(default=None, max_length=20)          # "" 나 null 이면 비움
+    # 규격 구조 칸 (2026-11-22) — 보내면 spec_source='manual', spec_checked=true 로 저장 (자동 해석이 더는 덮어쓰지 않음).
+    # spec_source='auto' 를 보내면 option2 로 다시 자동 해석. spec_checked 만 보내면 확인 표시만 바뀜
+    unit_amount: Optional[Decimal] = Field(default=None, ge=0, max_digits=10, decimal_places=2)
+    unit: Optional[str] = Field(default=None, max_length=8)
+    unit_count: Optional[int] = Field(default=None, ge=1, le=100000)
+    count_word: Optional[str] = Field(default=None, max_length=8)
+    pack_count: Optional[int] = Field(default=None, ge=1, le=10000)
+    total_count: Optional[int] = Field(default=None, ge=1, le=1000000)
+    spec_note: Optional[str] = Field(default=None, max_length=200)
+    spec_checked: Optional[bool] = None
+    spec_source: Optional[str] = None
+
+    @field_validator("unit")
+    @classmethod
+    def validate_unit(cls, v):
+        if v is None or v == "":
+            return None
+        u = {"g": "g", "kg": "kg", "ml": "ml", "l": "L"}.get(v.strip().lower())
+        if not u:
+            raise ValueError("단위는 g · kg · ml · L 중 하나입니다.")
+        return u
+
+    @field_validator("spec_source")
+    @classmethod
+    def validate_spec_source(cls, v):
+        if v is not None and v not in ("auto", "manual"):
+            raise ValueError("spec_source 는 auto · manual 중 하나입니다.")
+        return v
+
+    @field_validator("count_word", "spec_note")
+    @classmethod
+    def validate_spec_text(cls, v):
+        return clean_str(v)
 
     @field_validator("option1")
     @classmethod

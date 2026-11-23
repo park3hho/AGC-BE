@@ -19,6 +19,33 @@ from services.product.option_service import (
 )
 from services.product.serializers import survey_detail_dict, survey_summary_dict
 from utils.code_gen import CODE_ISSUE_RETRIES, SURVEY_CODE_PREFIX, next_code
+from utils.option_spec import spec_fields
+
+SPEC_EDIT = ("unit_amount", "unit", "unit_count", "count_word", "pack_count", "total_count", "spec_note")
+
+
+def _spec_patch(opt, data: dict) -> dict:
+    """옵션 PATCH 의 규격 구조 칸 처리 (2026-11-22).
+    - 구조 칸을 보내면 사람이 고친 것 → spec_source='manual', spec_checked=true. total_count 를 안 보내면 unit_count × pack_count.
+    - spec_source='auto' 를 보내거나, option2 가 바뀌었는데 manual 이 아니면 → option2 로 다시 자동 해석."""
+    edited = [k for k in SPEC_EDIT if k in data]
+    if edited:
+        if "pack_count" in data and data["pack_count"] is None:
+            data["pack_count"] = 1
+        if "total_count" not in data and ("unit_count" in data or "pack_count" in data):
+            uc = data.get("unit_count", opt.unit_count)
+            data["total_count"] = uc * (data.get("pack_count", opt.pack_count) or 1) if uc else None
+        data["spec_source"] = "manual"
+        data.setdefault("spec_checked", True)
+        return data
+    source = data.get("spec_source", opt.spec_source)
+    reparse = data.get("spec_source") == "auto" or (
+        "option2" in data and data["option2"] != opt.option2 and source != "manual")
+    if reparse:
+        checked = data.get("spec_checked", False)
+        data.update(spec_fields(data.get("option2", opt.option2)))
+        data["spec_checked"] = checked
+    return data
 
 
 def alive_surveys():
@@ -161,6 +188,7 @@ class PriceSurveyService:
         )
         if dup:
             raise HTTPException(status_code=409, detail=f"같은 옵션이 이미 있습니다: {new_key[0]} / {new_key[1] or '-'}")
+        data = _spec_patch(opt, data)
         await opt.update_from_dict(data).save(update_fields=[*data.keys(), "updated_at"])
         return await PriceSurveyService.get(s.id)
 

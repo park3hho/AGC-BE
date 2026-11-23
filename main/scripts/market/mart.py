@@ -116,7 +116,9 @@ def item_name(option2):
 
 def fix_specs(pr):
     """별도형: specs 수량·이름을 규격 문자열 기준으로 고치고 상품명을 '제품명 맛 규격' 으로."""
-    pr["specs"] = [(sp, unit_total(r.get("option2"), total), item_name(r.get("option2")) or name, r) for sp, total, name, r in pr["specs"]]
+    # 구조 칸(product_option.total_count)에서 온 수량은 이미 ×N박스 · 섞인 구성을 반영 → 그대로. 없을 때만 글자로 다시 센다 (2026-11-22)
+    pr["specs"] = [(sp, total if sp.get("total") else unit_total(r.get("option2"), total), item_name(r.get("option2")) or name, r)
+                   for sp, total, name, r in pr["specs"]]
     if pr["specs"]:
         pr["pname"] = f"{pr['title']} {pr['specs'][0][2]}"[:100]
     return pr

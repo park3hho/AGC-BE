@@ -41,6 +41,17 @@ class ProductOption(BaseModel):
     barcode = fields.CharField(max_length=20, null=True)          # 바코드 (GTIN, 숫자 8~14자리) — 쿠팡 공식 브랜드 등록에 필요
     sort = fields.SmallIntField(default=0)                         # 보이는 순서 (같으면 id 순)
     deleted_at = fields.DatetimeField(null=True)                  # 소프트 삭제 — 값이 있으면 가격 책정·조사 화면에서 숨김
+    # 규격 구조 칸 (2026-11-22) — option2 글자를 utils/option_spec.parse_option_spec 로 나눈 값. 마켓 등록·배송비는 이 칸을 먼저 쓰고
+    # 비어 있으면 예전 글자 해석으로. option2 를 고치면 자동 다시 해석 (spec_source='manual' 이면 그대로)
+    unit_amount = fields.DecimalField(max_digits=10, decimal_places=2, null=True)   # 개당 용량 숫자 (3g×8티백 → 3)
+    unit = fields.CharField(max_length=8, null=True)               # g · kg · ml · L
+    unit_count = fields.IntField(null=True)                        # 한 묶음 안 개수 (3g×8티백×2박스 → 8)
+    count_word = fields.CharField(max_length=8, null=True)         # 티백 · 개입 · 봉 · 병 · 캔 · 포 · 스틱 · 통 …
+    pack_count = fields.IntField(null=True, default=1)             # 박스·묶음 수 (괄호 밖 ×2박스 → 2)
+    total_count = fields.IntField(null=True)                       # 총 개수 = unit_count × pack_count (섞인 구성은 실제 총 개수)
+    spec_note = fields.CharField(max_length=200, null=True)        # 괄호 속 부가 설명 (약 · 상자 크기 · 섞인 구성 등)
+    spec_checked = fields.BooleanField(default=False)              # 사람이 확인함
+    spec_source = fields.CharField(max_length=8, null=True, default="auto")   # auto (해석기) · manual (사람이 고침)
 
     class Meta:
         table = "product_option"

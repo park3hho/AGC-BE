@@ -48,7 +48,7 @@ async def _estimate(o: MarketOrder, opt_cache: dict, prod_cache: dict) -> tuple[
     cat = prod_cache[code].category if prod_cache[code] else "beverage"
     qty = max(1, o.quantity or 1)
     buy = Decimal(str(opt.price_cny or 0)) * n * qty
-    sh = (bundle_option_dict(opt, n * qty, category=cat) if n * qty > 1 else option_shipping(opt.option1, opt.option2, cat))
+    sh = (bundle_option_dict(opt, n * qty, category=cat) if n * qty > 1 else option_shipping(opt.option1, opt.option2, cat, spec=opt))
     ship = sh.get("shipping_cny")
     return round(buy * EST_FX), (round(Decimal(str(ship)) * EST_FX) if ship is not None else None)
 

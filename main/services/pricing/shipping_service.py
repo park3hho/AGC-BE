@@ -39,7 +39,15 @@ from services.pricing.exchange_rate_service import ExchangeRateService
 from services.product.price_survey_service import alive_surveys
 from services.product.product_service import alive_products
 from services.product.serializers import money_cny, product_dict
+from utils.option_spec import spec_volume_ml
 from utils.volume import parse_box_cm, parse_box_per, parse_volume_ml, scale_pack
+
+
+def option_volume_ml(option1: Optional[str], option2: Optional[str], spec=None) -> Optional[int]:
+    """옵션 총 용량(ml, 1g = 1ml) — 규격 구조 칸(unit_amount × total_count, utils/option_spec)을 먼저 쓰고,
+    비어 있으면 예전 글자 해석(parse_volume_ml). spec = ProductOption 같은 구조 칸을 가진 객체·dict (2026-11-22)."""
+    v = spec_volume_ml(spec)
+    return v if v is not None else parse_volume_ml(option1, option2)
 
 
 def _kg(v: Decimal) -> str:
@@ -98,9 +106,10 @@ def _weights(volume: Optional[int], n: int, category: str,
     return actual, dim, max(actual or 0, dim)
 
 
-def option_shipping(option1: str, option2: Optional[str], category: str = "beverage") -> dict:
-    """옵션 1개의 배송비. 용량을 못 읽으면 값이 전부 null (배송비 계산 불가) — 차는 부피 무게로 계산한다."""
-    volume = parse_volume_ml(option1, option2)
+def option_shipping(option1: str, option2: Optional[str], category: str = "beverage", spec=None) -> dict:
+    """옵션 1개의 배송비. 용량을 못 읽으면 값이 전부 null (배송비 계산 불가) — 차는 부피 무게로 계산한다.
+    spec = 구조 칸을 가진 옵션(ProductOption) — 있으면 용량은 구조 칸 우선."""
+    volume = option_volume_ml(option1, option2, spec)
     box_text = option2 if parse_box_cm(option2) else option1
     actual, dim, weight = _weights(volume, 1, category, parse_box_cm(box_text), parse_box_per(box_text))
     if weight is None:
@@ -195,7 +204,7 @@ def option_dict(o: ProductOption, category: str = "beverage", measured: Optional
     return apply_measured({
         "id": o.id, "option1": o.option1, "option2": o.option2,
         "price_cny": money_cny(o.price_cny), "photo_url": o.photo_url,
-        **option_shipping(o.option1, o.option2, category),
+        **option_shipping(o.option1, o.option2, category, spec=o),
     }, measured)
 
 
@@ -209,7 +218,7 @@ def bundle_key(option_id: int, n: int) -> str:
 def bundle_option_dict(o: ProductOption, n: int, suggested: bool = False, category: str = "beverage") -> dict:
     """조사 옵션 N개 묶음 = 판매 옵션 1개. 원가 N배 · 용량 N배 + 박스 1개로 운임을 다시 계산한다.
     market_option2 = 마켓에 올릴 용량·입수 ("330ml×48캔"), pack_note = "24캔×2" 같은 설명."""
-    volume1 = parse_volume_ml(o.option1, o.option2)
+    volume1 = option_volume_ml(o.option1, o.option2, o)
     price = Decimal(str(o.price_cny)) * n
     base = {
         "key": bundle_key(o.id, n), "option_id": o.id, "bundle_qty": n, "suggested": suggested,
@@ -243,7 +252,7 @@ def bundle_option_dict(o: ProductOption, n: int, suggested: bool = False, catego
 
 def suggested_bundle_qty(o: ProductOption) -> Optional[int]:
     """이 옵션을 10kg 이상으로 만드는 가장 작은 묶음 수. 이미 10kg 이상 · 용량 모름 · 한도(30kg·면세)를 넘으면 None."""
-    volume = parse_volume_ml(o.option1, o.option2)
+    volume = option_volume_ml(o.option1, o.option2, o)
     if volume is None:
         return None
     target_g = int(BUNDLE_TARGET_KG * 1000)
@@ -258,7 +267,7 @@ def suggested_bundle_qty(o: ProductOption) -> Optional[int]:
 
 def bundle_suggestions(options: list[ProductOption]) -> list[tuple[ProductOption, int]]:
     """제품의 가장 무거운 옵션(같은 용량이면 맛별로 전부)도 10kg 미만이면 그 옵션들의 묶음을 제안한다."""
-    vols = {o.id: parse_volume_ml(o.option1, o.option2) for o in options}
+    vols = {o.id: option_volume_ml(o.option1, o.option2, o) for o in options}
     known = [v for v in vols.values() if v]
     if not known:
         return []

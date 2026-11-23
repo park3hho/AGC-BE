@@ -111,7 +111,7 @@ class CompetitorService:
                     our = prices.get(oid)
                     if not o or fee is None:
                         return {"option_id": oid, "our_price": our}
-                    sh = option_shipping(o.option1, o.option2, p.category)
+                    sh = option_shipping(o.option1, o.option2, p.category, spec=o)
                     ship_cny = sh.get("shipping_cny")
                     if getattr(p, "shipping_mode", None) == "separate":
                         ship_cny = 0   # 배송비 별도형(마트형): 운임은 손님 배송비 9,900원으로 따로 받음 → 원가·최소가는 상품가만 (2026-11-21)

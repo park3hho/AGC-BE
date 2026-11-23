@@ -288,6 +288,16 @@ product 1 ──< N price_survey
 | `photo_url` / `barcode` | varchar | | 옵션별 사진 · 바코드(GTIN) |
 | `sort` | smallint | ✅ | 보이는 순서 (같으면 id 순, 기존 옵션은 0) |
 | `deleted_at` | timestamptz | | 소프트 삭제 — 화면·가격 책정에서 숨김, id 는 남아 옛 주문 SKU 를 계속 찾는다 |
+| `unit_amount` / `unit` | numeric(10,2) / varchar(8) | | 규격 구조 칸 (2026-11-22 · migration 55) — 개당 용량 숫자와 단위(g·kg·ml·L). `3g×8티백×2박스` → 3 / g |
+| `unit_count` / `count_word` | int / varchar(8) | | 한 묶음 안 개수와 단위말 (8 / 티백). 무게 없는 `1갑 (2소포)` 는 unit_amount 없이 1 / 갑 |
+| `pack_count` | int, 기본 1 | | 괄호 밖 `×N박스`·`×N봉` 의 N. 괄호 속 `(2박스)` 는 설명이라 1 (앞 숫자가 이미 총 개수) |
+| `total_count` | int | | 총 개수 = unit_count × pack_count. 섞인 구성(`과일칩 4개입 + 티백 3g×8개` → 12)은 실제 총 개수라 곱과 다르다 (이 차이로 섞인 구성을 알아본다) |
+| `spec_note` | varchar(200) | | 괄호 속 부가 설명 · 약 · 섞인 구성 원문 |
+| `spec_checked` / `spec_source` | bool / varchar(8) | | 사람이 확인함 / `auto`(해석기) · `manual`(사람이 고침 — 자동 해석이 덮어쓰지 않음) |
+
+- 규격 구조 칸은 `utils/option_spec.parse_option_spec(option2)` 가 채운다: 옵션 새로 만들 때·option2 가 바뀔 때(조사 저장 · 옵션 PATCH) 자동, manual 은 그대로. 기존 줄은 `scripts/backfill_option_spec.py [--apply]`, 못 읽은 것·애매한 것·예전 해석과 다른 것은 `docs/option-spec-review.md`.
+- 쓰는 곳은 구조 칸 우선, 비어 있으면 예전 글자 해석: 배송비 용량(`shipping_service.option_volume_ml` = unit_amount × total_count, 섞인 구성은 예전 `parse_volume_ml`) · 마켓 등록 스크립트(`cp_base.option_spec` → 쿠팡 build_products · 네이버 nv_base build, `mart.fix_specs` 는 구조 칸 수량을 다시 세지 않음).
+- 사람이 고치기: `PATCH /price-surveys/{survey_id}/options/{option_id}` 에 구조 칸을 보내면 spec_source='manual', spec_checked=true (total_count 를 안 보내면 unit_count × pack_count). `{"spec_source": "auto"}` 는 option2 로 다시 자동 해석.
 
 - 제약: 살아 있는 옵션 안에서 (제품, 공백 뺀 소문자 옵션1, 옵션2) 유일 (`uidx_product_opt_key_optnorm`). `UNIQUE(id, product_id)` 를 두고 `product_bundle` · `competitor_price` 의 `(option_id, product_id)` 가 복합 FK 로 가리킨다 → 묶음·경쟁가의 `product_id` 가 옵션의 제품과 어긋날 수 없다.
 - `option_price` 는 product_id 가 없어 복합 FK 를 못 건다 — 저장(`PricingService.save`)이 "이 제품의 살아 있는 옵션"만 받는 것으로 막는다.
