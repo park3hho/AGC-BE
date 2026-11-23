@@ -34,10 +34,14 @@ _SAFE_CODE_RE = re.compile(r"[^A-Za-z0-9_-]")
 _SOF_MARKERS = {0xC0, 0xC1, 0xC2, 0xC3, 0xC5, 0xC6, 0xC7, 0xC9, 0xCA, 0xCB, 0xCD, 0xCE, 0xCF}
 
 
-def content_hash(content: dict, common_payload: dict) -> str:
-    """content + 공통 안내 → sha256 hex. 키 순서와 상관없이 같은 값이면 같은 해시."""
-    raw = json.dumps({"content": content, "common": common_payload}, sort_keys=True, ensure_ascii=False,
-                     separators=(",", ":"))
+def content_hash(content: dict, common_payload: dict, shipping_mode: str | None = None) -> str:
+    """content + 공통 안내 → sha256 hex. 키 순서와 상관없이 같은 값이면 같은 해시.
+    배송비 별도형이면 S1 띠·공통 안내 배송비 줄이 달라지므로 해시에 넣는다 (2026-11-24).
+    포함형·미분류는 예전과 같은 해시 — 기존 내보내기가 '예전'으로 바뀌지 않게."""
+    payload = {"content": content, "common": common_payload}
+    if shipping_mode == "separate":
+        payload["shipping_mode"] = "separate"
+    raw = json.dumps(payload, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
 

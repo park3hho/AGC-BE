@@ -284,7 +284,8 @@ def _page_summary(dp: DetailPage) -> dict:
 
 async def _page_dict(dp: DetailPage) -> dict:
     await dp.fetch_related("updated_by", "reviewed_by")
-    c_hash = exports.content_hash(dp.content, _common_payload(await _get_common()))
+    _p = await Product.get_or_none(id=dp.product_id)
+    c_hash = exports.content_hash(dp.content, _common_payload(await _get_common()), getattr(_p, "shipping_mode", None))
     reviews = await (
         DetailPageReview.filter(page_id=dp.id).order_by("-id").limit(REVIEW_HISTORY_SIZE).prefetch_related("user")
     )
@@ -456,7 +457,7 @@ class DetailPageService:
         exports.require_approved(dp)
         common_payload = _common_payload(await _get_common())
         _markers_block(dp.content, common_payload, "이미지로 내보낼")
-        now_hash = exports.content_hash(dp.content, common_payload)
+        now_hash = exports.content_hash(dp.content, common_payload, getattr(p, "shipping_mode", None))
         if c_hash != now_hash:
             raise HTTPException(status_code=409, detail="그린 뒤 상세페이지가 바뀌었습니다. 다시 불러와 내보내주세요.")
         meta = exports.check_slices(platform, blobs)
