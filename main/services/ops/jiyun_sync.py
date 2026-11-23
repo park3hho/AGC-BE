@@ -54,8 +54,21 @@ def _trace_dispatch_time(text: str | None) -> datetime | None:
     return None
 
 
+# 시·도 이름 표기 차이(전라북도↔전북특별자치도, 강원도↔강원특별자치도, 서울특별시↔서울 등)를 짧은 이름으로 맞춘다 (11-23 오탐: 전주 건)
+_PROVINCE = [
+    (r"서울(?:특별시|시)", "서울"), (r"부산(?:광역시|시)", "부산"), (r"대구(?:광역시|시)", "대구"), (r"인천(?:광역시|시)", "인천"),
+    (r"광주(?:광역시)", "광주"), (r"대전(?:광역시|시)", "대전"), (r"울산(?:광역시|시)", "울산"), (r"세종(?:특별자치시|시)", "세종"),
+    (r"경기도", "경기"), (r"강원(?:특별자치도|도)", "강원"), (r"충청북도", "충북"), (r"충청남도", "충남"),
+    (r"(?:전라북도|전북특별자치도)", "전북"), (r"전라남도", "전남"), (r"경상북도", "경북"), (r"경상남도", "경남"),
+    (r"제주(?:특별자치도|도)", "제주"),
+]
+
+
 def _norm(s: str | None) -> str:
-    return re.sub(r"[\s\-(),·]", "", s or "")
+    s = re.sub(r"[\s\-(),·]", "", s or "")
+    for pat, short in _PROVINCE:
+        s = re.sub(pat, short, s)
+    return s
 
 
 async def _receiver_check(detail: dict, orders: list[MarketOrder]) -> tuple[str, str]:
