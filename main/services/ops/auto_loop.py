@@ -2,6 +2,7 @@
 
 OPS_AUTO_MINUTES(기본 10)마다 차례로:
   card   카드 결제 자동 대조 (services/ops/auto_card.py) — 항상 켬 (우리 DB 만 고침)
+  shop_digest 자사몰 유입 하루 요약 → AI 알림 (auto_shop_digest.py, 매일 9시 지나 한 번)
   claims 쿠팡 출고중지 요청 · 반품 접수 · 취소 완료인데 출고중지 미처리 감지 → AI 알림 (auto_claims.py, 30분마다, 처리는 안 함)
 마켓에 쓰는 일(네이버 발송지연 · 송장 발송처리)은 고객에게 보이므로 따로 스위치(기본 꺼짐)로 단다.
 최근 결과는 LAST 에 두고 GET /ops/auto 로 본다."""
@@ -27,9 +28,10 @@ async def _job(name: str, fn) -> None:
 
 
 async def run_all() -> dict:
-    from services.ops import auto_card, auto_claims
+    from services.ops import auto_card, auto_claims, auto_shop_digest
     await _job("card", auto_card.run_once)
     await _job("claims", auto_claims.run_once)
+    await _job("shop_digest", auto_shop_digest.run_once)
     return LAST
 
 

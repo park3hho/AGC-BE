@@ -7,7 +7,7 @@ ALERT_KIND = {
     "package_partial": "소포 일부 입고", "jiyun_paid": "집운 결제 기록", "dispatched": "집운 출고",
     "invoice_sent": "송장 등록", "import_sent": "수입신고 전송", "import_error": "수입신고 오류",
     "claim": "취소·반품", "refund": "환불", "deadline_d3": "발송기한 D-3", "deadline_d1": "발송기한 D-1",
-    "deadline_over": "출고지연", "stock_aging": "재고 오래됨", "card_confirmed": "카드값 확정", "risk": "놓침 위험 (매일 점검)", "other": "기타",
+    "deadline_over": "출고지연", "stock_aging": "재고 오래됨", "card_confirmed": "카드값 확정", "shop_digest": "자사몰 유입", "risk": "놓침 위험 (매일 점검)", "other": "기타",
 }
 ALERT_LEVEL = {"info": "알림", "action": "할 일", "blocked": "막힘"}
 
