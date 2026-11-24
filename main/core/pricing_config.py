@@ -63,5 +63,5 @@ DEFAULT_FEE_RATES = {
     Platform.COUPANG: {"platform_fee_rate": "11.66", "payment_fee_rate": "0"},
     Platform.NAVER: {"platform_fee_rate": "3", "payment_fee_rate": "3.63"},
     # 자사몰: 판매수수료 없음. 결제 = 네이버페이 결제형 · 카카오페이 온라인 영세 등급 약 0.9~0.96% → 1%로 어림 (2026-10-26 조회)
-    Platform.SHOP: {"platform_fee_rate": "0", "payment_fee_rate": "1"},
+    Platform.SHOP: {"platform_fee_rate": "0", "payment_fee_rate": "3.52"},   # KCP 일반가맹점 카드 3.2% + VAT (계약 메일 11-03, 영세 우대 1.72% 적용 전)
 }
