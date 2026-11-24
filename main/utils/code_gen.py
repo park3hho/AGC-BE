@@ -16,6 +16,7 @@ from fastapi import HTTPException
 PRODUCT_CODE_PREFIX = "PR"
 SURVEY_CODE_PREFIX = "RS"
 ORDER_CODE_PREFIX = "OR"
+TEST_ORDER_CODE_PREFIX = "TS"   # 시험 주문 (자사몰 TEST-… 상품 등) — OR 순번과 따로
 CODE_MAX_SEQ = 0xFFFF
 CODE_ISSUE_RETRIES = 5        # 동시 발급 충돌 시 재시도 횟수
 

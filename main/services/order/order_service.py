@@ -22,7 +22,7 @@ from services.order import market_clients as mc
 from services.order import shop_orders as so
 from services.order.pccc import (PcccInput, check_pccc, mask_name, mask_phone, norm_pccc, norm_phone, norm_zip,
                                  receiver_fingerprint)
-from utils.code_gen import CODE_ISSUE_RETRIES, ORDER_CODE_PREFIX, next_code
+from utils.code_gen import CODE_ISSUE_RETRIES, ORDER_CODE_PREFIX, TEST_ORDER_CODE_PREFIX, next_code
 
 logger = logging.getLogger(__name__)
 KST = timezone(timedelta(hours=9))
@@ -246,8 +246,14 @@ async def issue_code(o: MarketOrder, actor: dict, run=None) -> str:
         return o.code
     base = o.ordered_at or o.paid_at or datetime.now(timezone.utc)
     day = base.astimezone(KST).date()
+    # 자사몰 결제 시험 상품(TEST-…) 주문은 TS- 로 따로 발급 → 실제 주문 OR 순번을 건너뛰지 않게 (2026-11-24 사용자)
+    is_test_sku = (o.market == "shop" and str(o.seller_code or o.market_option_id or "").upper().startswith("TEST"))
+    if is_test_sku and not o.is_test:
+        o.is_test = True
+        await o.save(update_fields=["is_test", "updated_at"])
+    prefix = TEST_ORDER_CODE_PREFIX if (is_test_sku or o.is_test) else ORDER_CODE_PREFIX
     for _ in range(CODE_ISSUE_RETRIES):
-        o.code = await next_code(MarketOrder, ORDER_CODE_PREFIX, day)
+        o.code = await next_code(MarketOrder, prefix, day)
         try:
             await o.save(update_fields=["code", "updated_at"])
         except IntegrityError:
