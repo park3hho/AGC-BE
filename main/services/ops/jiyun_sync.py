@@ -64,6 +64,17 @@ _PROVINCE = [
 ]
 
 
+_PROVINCE_SHORT = {"서울", "부산", "대구", "인천", "광주", "대전", "울산", "세종", "경기", "강원", "충북", "충남", "전북", "전남", "경북", "경남", "제주"}
+
+
+def _is_province(tok: str) -> bool:
+    """주소 첫 몇 토막 중 광역 단위(도·특별시·광역시·통합특별시)인지."""
+    t = re.sub(r"[\s\-(),·]", "", tok or "")
+    if re.search(r"(특별자치도|특별자치시|통합특별시|특별시|광역시)$", t) or re.fullmatch(r"(경기|강원|충청북|충청남|전라북|전라남|경상북|경상남|제주)도", t):
+        return True
+    return t in _PROVINCE_SHORT
+
+
 def _norm(s: str | None) -> str:
     s = re.sub(r"[\s\-(),·]", "", s or "")
     for pat, short in _PROVINCE:
@@ -83,7 +94,8 @@ async def _receiver_check(detail: dict, orders: list[MarketOrder]) -> tuple[str,
     for o in orders:
         r = receiver_full(o)
         ok_name = bool(name) and _norm(r["name"]) == name
-        toks = [t for t in (r["address"] or "").split() if t][:3]   # 시 · 구 · (동/로)
+        # 시·도 이름은 표기가 자주 바뀜다(전라북도→전북특별자치도, 전라남도→전남광주통합특별시 등) → 대조에서 빼고 시·군·구·읍·로만 본다 (11-25)
+        toks = [t for t in (r["address"] or "").split() if t and not _is_province(t)][:3]   # 시·군·구 · (동/로)
         hit = [t for t in toks[:2] if _norm(t) and _norm(t) in addr]
         if ok_name and len(hit) >= min(2, len(toks)):
             return "match", f"{mask_name(r['name'])} 이름·{' '.join(toks[:2])} 일치 ({o.code})"
