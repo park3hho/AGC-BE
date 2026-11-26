@@ -93,6 +93,7 @@ class Ctx:
     k_actual: dict[str, float] = field(default_factory=dict)   # 카테고리별 (실제무게 − 상자) / 용량
     k_dim: dict[str, float] = field(default_factory=dict)      # 음료: 부피무게 / 용량
     dim_abs: dict[str, float] = field(default_factory=dict)    # 차·과자: 상자 1개 부피무게 중앙값(g)
+    k_dim_nb: dict[str, float] = field(default_factory=dict)   # 차·과자: 부피무게 / 용량
 
 
 async def _opts(conn) -> dict[int, Opt]:
@@ -178,6 +179,8 @@ async def load_context(before: Optional[datetime] = None, exclude_base: Optional
         if o and o.category != "beverage" and m["dim_g"]:
             da.setdefault(o.category, []).append(m["dim_g"])
     ctx.dim_abs = {c: median(v) for c, v in da.items()}
+    # 작은 낱개를 여러 개 묶으면 상자는 하나, 부피는 내용물에 비례 — '용량 1g당 부피무게'(차·과자) (2026-11-27)
+    ctx.k_dim_nb = {c: median(v) for c, v in kd.items() if c == "other"}   # 차(tea)는 잎 무게와 상자 크기가 무관 → 상자 하나 값만
     return ctx
 
 
@@ -209,8 +212,14 @@ def estimate_option(ctx: Ctx, option_id: int) -> dict:
             sh = option_shipping(o.option1 or "", o.option2, o.category)
             dim = sh.get("dim_weight_g")
         carton = o.volume_ml >= CARTON_ML
+        shared = {}
+        if not carton and not o.box_dim_g and o.category != "beverage":
+            # 상자 하나(dim_once)를 여러 개가 나눠 쓰고, 개수만큼은 내용물 비례 부피(dim_g)로 더한다
+            knb = ctx.k_dim_nb.get(o.category)
+            shared = {"dim_once_g": dim or 0}
+            dim = o.volume_ml * knb if knb else 0
         return {"actual_g": o.volume_ml * ka + (BOX_G if carton else 0), "box_once_g": 0 if carton else BOX_G,
-                "dim_g": dim, "source": "predicted",
+                "dim_g": dim, "source": "predicted", **shared,
                 "note": f"{o.category} 모델 · 1ml당 {ka:.2f}g" + (f" · 부피 1ml당 {kd:.2f}g" if kd and not o.box_dim_g else "")
                         + (" · 옵션 상자 크기" if o.box_dim_g else "")}
     sh = option_shipping(o.option1 or "", o.option2, o.category)
@@ -222,12 +231,18 @@ def estimate(ctx: Ctx, items: list[tuple[int, int]]) -> dict:
     lines, act, dim, smax = [], 0.0, 0.0, 0.0
     rates = set()
     box_once = 0.0
+    dim_once, dim_small = 0.0, 0.0
     for oid, units in items:
         e = estimate_option(ctx, oid)
         a = (e["actual_g"] or 0) * units
         box_once = max(box_once, e.get("box_once_g") or 0)
         d = (e["dim_g"] or 0) * units
-        act, dim, smax = act + a, dim + d, smax + max(a, d)
+        if "dim_once_g" in e:
+            dim_once = max(dim_once, e["dim_once_g"])
+            dim_small += d
+            act, smax = act + a, smax + a
+        else:
+            act, dim, smax = act + a, dim + d, smax + max(a, d)
         o = ctx.opts.get(oid)
         rates.add(ctx.rate_by_product.get(o.product_id, "food") if o else "food")
         lines.append({"option_id": oid, "units": units, "title": o.title[:40] if o else None, "label": o.label if o else None,
@@ -235,6 +250,10 @@ def estimate(ctx: Ctx, items: list[tuple[int, int]]) -> dict:
     rate = "general" if rates == {"general"} else "food"
     act += box_once
     smax += box_once
+    if dim_once or dim_small:
+        small = max(dim_once, dim_small)
+        dim += small
+        smax = max(smax, act, dim)
     w = max(act, dim) * MARGIN
     smax *= MARGIN
     fee = fee_cny(w, rate)
