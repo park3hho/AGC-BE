@@ -64,8 +64,13 @@ async def _is_mixed(j: Optional[JiyunShipment], order_id: int) -> bool:
 async def _resolve(order: MarketOrder) -> dict:
     code, option_id, bundle = parse_sku(order.seller_code)
     product = await Product.get_or_none(code=code) if code else None
+    units = max(1, bundle) * max(1, order.quantity or 1)
+    # 주문 1건을 집운 여러 건(번호 다름)으로 나눠 보냈으면 상자 하나에는 그만큼 나눈 개수만 든다 (2026-11-26 정정 — 수량 2 주문이 6.6kg 상자 2개로 간 사례)
+    nos = {_base_no(n) for n in await JiyunShipment.filter(deleted_at=None, order_id=order.id).values_list("jiyun_no", flat=True) if n}
+    if len(nos) > 1 and units % len(nos) == 0:
+        units //= len(nos)
     return {"product_id": product.id if product else None, "option_id": option_id, "sku": (order.seller_code or "").strip() or None,
-            "units": max(1, bundle) * max(1, order.quantity or 1)}
+            "units": units}
 
 
 class MeasureService:

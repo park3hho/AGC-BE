@@ -27,6 +27,7 @@ from routers import (
     jiyun_bundle,
     jiyun_stock,
     option_measure,
+    jiyun_estimate,
     domestic,
     thumb,
     shop_analytics,
@@ -95,6 +96,7 @@ app.include_router(taobao_purchase.router)
 app.include_router(jiyun_bundle.router)   # 집운 묶음 PRE_LP… (2026-11-16) — /jiyun 보다 먼저
 app.include_router(jiyun_stock.router)   # 집운 가용재고 (2026-11-18) — /jiyun 보다 먼저
 app.include_router(option_measure.router)   # 옵션별 실측 — 보낸 상자 무게·크기, 비공개 (2026-11-18)
+app.include_router(jiyun_estimate.router)   # 집운 운임 예측 — 실측 우선, 없으면 예측 · 묶음 추가 운임 (2026-11-26)
 app.include_router(jiyun.router)
 app.include_router(domestic.router)
 app.include_router(shop_analytics.router)   # 자사몰 분석 (2026-11-15)
