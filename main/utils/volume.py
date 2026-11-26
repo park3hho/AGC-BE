@@ -61,8 +61,13 @@ _ML_PER_UNIT = {
 }
 
 
+def _nocomma(s: str) -> str:
+    """천 단위 쉼표 제거 — "1,000g×1봉" → "1000g×1봉" (11-26 리서처: 쉼표 때문에 무게를 1g·못 읽음으로 봐 배송비 방식이 잘못 분류됨)"""
+    return re.sub(r"(?<=\d),(?=\d{3}(?!\d))", "", s)
+
+
 def parse_volume_ml(*texts: Optional[str]) -> Optional[int]:
-    text = " ".join(t for t in texts if t)
+    text = _nocomma(" ".join(t for t in texts if t))
     m = _VOLUME.search(text)
     if not m:
         return None

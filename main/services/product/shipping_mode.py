@@ -27,9 +27,11 @@ _COUNT_WIDE = re.compile(r"(\d+)\s*(개입|팩|개|병|캔|입|봉|갑|포|정|�
 
 def unit_count(option1: Optional[str], option2: Optional[str]) -> Optional[int]:
     """옵션 이름의 개수 — '500ml×15병' → 15, '70g×10봉' → 10, '1.5L' → 1, 용량도 개수도 없으면 None."""
+    from utils.volume import _nocomma
     for text in (option2, option1):
         if not text:
             continue
+        text = _nocomma(text)
         m = _VOLUME.search(text)
         if m:
             rest = text[m.end():]
