@@ -69,7 +69,7 @@ from utils.option_spec import spec_dict as _spec_dict   # 규격 구조 칸 (202
 
 def option_spec(r):
     """옵션 행 → (sp, 옵션 1개의 총 개수). product_option 구조 칸(unit_amount · total_count …)이 있으면 그것,
-    비어 있으면 예전처럼 parse_spec(option2). 구조 칸에서 온 sp 에는 "total" 이 있다 (mart.fix_specs 가 다시 세지 않게)."""
+    비어 있으면 예전처럼 parse_spec(option2). 구조 칸에서 온 sp 에는 "total" 이 있다."""
     sp = _spec_dict(r)
     if sp:
         return sp, sp["total"]

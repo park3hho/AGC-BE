@@ -141,18 +141,7 @@ class ProductService:
         if not data:
             raise HTTPException(status_code=400, detail="바꿀 내용이 없습니다.")
         p = await _get_alive(product_id)
-        mode = data.pop("shipping_mode", "__unset__")
-        if mode != "__unset__":
-            if mode in ("included", "separate"):
-                data["shipping_mode"], data["shipping_mode_source"] = mode, "manual"
-            else:   # auto 또는 null → 자동 분류로
-                data["shipping_mode_source"] = "auto"
-        if data:
-            await p.update_from_dict(data).save()
-        if mode != "__unset__" or "category" in data:
-            from services.product.shipping_mode import sync_product
-            await sync_product(p.id)
-            await p.refresh_from_db()
+        await p.update_from_dict(data).save()
         return product_dict(p)
 
     @staticmethod

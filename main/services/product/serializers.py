@@ -43,9 +43,7 @@ def product_dict(p) -> dict:
         "category": p.category,
         "subcategory": p.subcategory,
         "tea_form": p.tea_form,
-        "shipping_mode": p.shipping_mode,                   # included 배송비 포함형 · separate 배송비 별도형 · null 미분류 (2026-11-20)
-        "shipping_mode_source": p.shipping_mode_source,     # auto · manual
-        "unit_weight_g": p.unit_weight_g, "unit_count": p.unit_count, "shipping_mode_note": p.shipping_mode_note,
+        "shop_hidden": p.shop_hidden,                       # 자사몰 숨김 (2026-11-26)
         "created_at": p.created_at.isoformat(),
         "updated_at": p.updated_at.isoformat(),
     }

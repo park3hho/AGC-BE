@@ -6,7 +6,6 @@ exec(src.split("async def main(args):")[0])
 sys.argv = sys_argv
 from services.product.detail_export_service import jpeg_size, png_size
 sys.path.insert(0, "/app/scripts/market")
-import mart   # 배송비 별도형(낱개) — 9,900원 · 묶음배송 · 태그 (2026-11-21)
 
 _strip_cn0 = strip_cn
 def strip_cn(s):
@@ -74,10 +73,7 @@ async def main(args):
             log(f"  skip pid {pid} (already listed)"); continue
         try:
             prs = await build_products(conn, pid)
-            prow = (await q(conn, "select photos, category, shipping_mode, title_ko from product where id=$1", pid))[0]
-            sep = mart.is_separate(prow)
-            if sep:
-                prs = [mart.fix_specs(pr) for pr in prs]
+            prow = (await q(conn, "select photos, category, title_ko from product where id=$1", pid))[0]
             photos = prow["photos"] if isinstance(prow["photos"], list) else json.loads(prow["photos"] or "[]")
             is_tea = prow["category"] == "tea"
         except Exception as e:
@@ -97,7 +93,7 @@ async def main(args):
                     cat, catname = 58874, "기타전통차류"
                 else:
                     cat, catname = await predict(pr["pname"])
-                    if str(cat) not in BEV_OK and not sep:   # 별도형 낱개(원두·젤리 등)는 예측 카테고리 그대로
+                    if str(cat) not in BEV_OK:
                         t = pr["title"]
                         if re.search(r"탄산|소다|콜라|스파클링|기포", t): cat, catname = 58768, "기타탄산음료"
                         elif re.search(r"전해질|스포츠|이온", t): cat, catname = 58770, "스포츠/이온음료"
@@ -124,11 +120,6 @@ async def main(args):
                                          {"attributeTypeName": "개당 수량", "attributeValueName": f"{sp['cnt']}개입"},
                                          {"attributeTypeName": "수량", "attributeValueName": f"{boxes}박스"}]
             tags = make_tags(pr, catname, is_tea)
-            if sep:
-                mart.cp_delivery(body)
-                # 싼 낱개(젤리 2,800원 등)는 반품배송비가 판매가를 넘을 수 없다 (쿠팡 '0원 ~ 판매가')
-                body["returnCharge"] = min(body["returnCharge"], min(it["salePrice"] for it in body["items"]))
-                tags = mart.tags(prow["title_ko"], pr["flavor"], prow["category"], 20)
             for it in body["items"]:
                 it["searchTags"] = tags
             if pr["brand"] in BRAND_IDS:
@@ -160,9 +151,7 @@ async def main(args):
                 if not keep:
                     log(f"   skip {key} (add-flavor: all options already listed)"); continue
             body["items"] = keep
-            if sep and mart.CP_BRAND_IDS.get(pr["brand"]):   # 쿠팡이 브랜드를 감지해 brandId 를 요구하는 낱개 (UHA 등) — 바코드 없어도 올린다
-                body["brandId"] = mart.CP_BRAND_IDS[pr["brand"]]
-            log(f"== {key} {pr['pname']} | cat {cat} {catname} | {'배송비 ' + str(body['deliveryCharge']) + ' 묶음' if sep else '무료배송'} | tags {len(tags)} {tags} | " + str([(i['itemName'], i['salePrice'], i['externalVendorSku']) for i in body['items']]))
+            log(f"== {key} {pr['pname']} | cat {cat} {catname} | 무료배송 | tags {len(tags)} {tags} | " + str([(i['itemName'], i['salePrice'], i['externalVendorSku']) for i in body['items']]))
             if dry:
                 json.dump(body, open(f"/private/market/cpnew_{pr['code']}.json", "w"), ensure_ascii=False); continue
             for attempt in range(2):
@@ -172,13 +161,6 @@ async def main(args):
                     log(f"   POST {r.get('code')} spid={r.get('data')} {msg[:160]}")
                     if r.get("code") == "SUCCESS" and r.get("data"):
                         DONE.add(key); open("/private/market/cp_done.txt", "a").write(f"{key}|{r.get('data')}\n"); break
-                    if attempt == 0 and sep and "이미 등록된 상품과 중복" in msg and not body.get("brandId"):
-                        # 별도형 낱개가 박스 상품과 같은 바코드 — 바코드 없이 다시 (박스 상품은 무료배송이라 옵션으로 못 합침, 2026-11-22)
-                        log("   retry without barcode (GTIN 중복)")
-                        for it in body["items"]:
-                            it["barcode"] = ""; it["emptyBarcode"] = True; it["emptyBarcodeReason"] = "해외구매대행 상품"
-                            it["attributes"] = [a for a in it["attributes"] if a["attributeTypeName"] != "Global Trade Item Number"]
-                        continue
                     if attempt == 0 and body["brand"] and not body.get("brandId") and ("브랜드" in msg or "MPN/GTIN" in msg):
                         log("   retry without brand"); body["brand"] = ""; continue
                     break

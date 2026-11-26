@@ -7,7 +7,6 @@ exec(w)
 sys.argv = _argv
 
 sys.path.insert(0, "/app/scripts/market")
-import mart   # 배송비 별도형(낱개) — 9,900원 · 기본 묶음그룹 · 차류 카테고리 · 태그 (2026-11-21)
 
 CATBY = json.load(open("/app/scripts/market/nv_catmap.json"))
 GUIDES = {}
@@ -47,18 +46,24 @@ def opt_value(o, sp, total, flavor):
     if n == "수량": return f"{total}개" if not o.get("_tea") else f"{max(1, total // max(1, sp['cnt']))}개"
     return None
 
+def to_jpg(path):
+    """네이버 이미지 업로드는 JPG·PNG·GIF·BMP 만 — webp 등은 JPG 로 바꿔 /tmp 에 둔다."""
+    if re.search(r"\.(jpe?g|png|gif|bmp)$", path, re.I):
+        return path
+    import os
+    from PIL import Image
+    out = "/tmp/nvimg_" + os.path.basename(path).rsplit(".", 1)[0] + ".jpg"
+    Image.open(path).convert("RGB").save(out, "JPEG", quality=92)
+    return out
+
+
 async def build_groups(conn, pid, dry=False):
     prs = await build(conn, pid)
     if not prs: return [(None, "no build")]
     code = prs[0]["code"]
     cat = int(CATBY.get(code) or ncat(code, prs[0]["flavor"])[0])
-    prow = (await q(conn, "select category, shipping_mode, title_ko from product where id=$1", pid))[0]
+    prow = (await q(conn, "select category, title_ko from product where id=$1", pid))[0]
     is_tea = prow["category"] == "tea"
-    if mart.is_separate(prow):
-        cat = mart.nv_category(prow["title_ko"], prow["category"]) or cat
-        for p in prs:
-            mart.fix_specs(p)
-            p["_sep"] = True; p["_title_ko"] = prow["title_ko"]; p["_category"] = prow["category"]
     flavors = list(dict.fromkeys(p["flavor"] for p in prs))
     multi = len(flavors) > 1
     g = await guide_for(cat)
@@ -104,7 +109,7 @@ async def build_group(conn, prs, flavors, cat, guide, is_tea, dry=False, per_fla
     seen = set()
     for fl, d in by_fl.items():
         p = d["pr"]
-        rep = "R" if dry else (await upload_images([mart.to_jpg(local(rep_url(p["photo"])))]))[0]
+        rep = "R" if dry else (await upload_images([to_jpg(local(rep_url(p["photo"])))]))[0]
         heavy_any = False
         for sp, total, name, r in sorted(d["specs"], key=lambda x: x[3]["sale_price"]):
             key = (strip_cn(fl), sp["amt"], sp["unit"], total)
@@ -129,7 +134,6 @@ async def build_group(conn, prs, flavors, cat, guide, is_tea, dry=False, per_fla
                                                        "shippingAddressId": RELEASE, "returnAddressId": RETURN}, "installationFee": False},
                 "originAreaInfo": {"originAreaCode": "0200037", "importer": "이도식품 (해외구매대행)"},
                 "sellerCodeInfo": {"sellerManagementCode": f"{code}-{r['oid']}" + (f"x{bq}" if bq > 1 else "")},
-                **({"_sep": True} if base_pr.get("_sep") else {}),
                 "customsTaxType": "NOT_APPLICABLE",
                 "unitCapacity": unit_cap({"specs": [(sp, total, name, r)]}),
                 "_meta": {"flavor": fl, "name": name, "oid": r["oid"], "bq": bq, "code": code, "price": r["sale_price"], "vals": [x["valueName"] for x in opts]},
@@ -139,26 +143,13 @@ async def build_group(conn, prs, flavors, cat, guide, is_tea, dry=False, per_fla
     for t in words:
         t = re.sub(r"[^0-9A-Za-z가-힣]", "", t or "")
         if 1 < len(t) <= 15 and t not in tags and t != "레드불": tags.append(t)
-    if base_pr.get("_sep"):
-        tags = mart.tags(base_pr["_title_ko"], strip_cn(flavors[0]) if len(flavors) == 1 else "", base_pr["_category"], 10)
-        for s in specifics:
-            if s.pop("_sep", None):
-                mart.nv_delivery(s["deliveryInfo"])
     pr_notice = dict(base_pr); pr_notice["specs"] = sorted(sum((d["specs"] for d in by_fl.values()), []), key=lambda x: x[3]["sale_price"])[:6]
     pr_notice["notice_title"] = title
-    nt = notice(pr_notice, mart.food_type(base_pr["_title_ko"], base_pr["_category"]) if base_pr.get("_sep") else "")
+    nt = notice(pr_notice, "")
     for k, v in list(nt.get("generalFood", {}).items()):
         if isinstance(v, str) and k != "customerServicePhoneNumber":
             nt["generalFood"][k] = re.sub(r"\s{2,}", " ", re.sub(r"[^0-9A-Za-z가-힣\s,.()%/+\-:×]", " ", v)).strip() or "상품 상세페이지 참조"
     gname = title if len(title) < 40 else re.sub(r"\s*\([^)]*\)", "", title).strip()
-    if base_pr.get("_sep") and len(gname) >= 40:   # 별도형: 자르기 전에 제품명의 수량·'세트' 말부터 뺀다 (맛 이름은 살린다)
-        fl = strip_cn(flavors[0]) if len(flavors) == 1 else ""
-        head = gname[: len(gname) - len(fl)].strip() if fl and gname.endswith(fl) else gname
-        words = head.split()
-        for w in [w for w in words[1:] if re.search(r"\d|세트|모음|·", w)]:
-            if len(" ".join(words + ([fl] if fl else []))) < 40: break
-            words.remove(w)
-        gname = " ".join(words + ([fl] if fl else []))
     if len(gname) >= 40: gname = gname[:39].rstrip()
     gp = {"leafCategoryId": str(cat), "name": gname, "guideId": guide["guideId"],
           "brandName": base_pr["brand"], "manufacturerName": base_pr["brand"],

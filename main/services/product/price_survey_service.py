@@ -98,7 +98,6 @@ class PriceSurveyService:
                     pairs = await match_options(product.id, body.options, conn)
                     await record_prices(survey.id, pairs, conn)
                     await refresh_current_prices(product.id, conn)
-                __import__("services.product.shipping_mode", fromlist=["kick"]).kick(product.id)   # 배송비 방식 다시 분류
                 return await PriceSurveyService.get(survey.id)
             except IntegrityError:
                 continue    # 같은 번호를 다른 요청이 먼저 가져감 → 롤백 후 다음 번호로 다시
@@ -154,7 +153,6 @@ class PriceSurveyService:
                     await PriceSurveyPrice.filter(survey_id=s.id, option_id__in=gone).using_db(conn).delete()
                     await soft_delete(gone, conn)
                 await refresh_current_prices(s.product_id, conn)
-        __import__("services.product.shipping_mode", fromlist=["kick"]).kick(s.product_id)   # 배송비 방식 다시 분류
         return await PriceSurveyService.get(s.id)
 
     @staticmethod

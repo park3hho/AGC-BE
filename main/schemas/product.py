@@ -27,16 +27,6 @@ class ProductCreate(BaseModel):
     category: Optional[str] = Field(default=None, max_length=20)
     subcategory: Optional[str] = Field(default=None, max_length=20)
     tea_form: Optional[str] = Field(default=None, max_length=20)  # 차만
-    # 배송비 방식 (2026-11-20) — included · separate 는 사람이 고른 값(manual, 자동이 안 덮음) · auto 는 자동 분류로 되돌림
-    shipping_mode: Optional[str] = None
-
-    @field_validator("shipping_mode")
-    @classmethod
-    def validate_shipping_mode(cls, v):
-        if v is not None and v not in ("included", "separate", "auto"):
-            raise ValueError("배송비 방식은 included · separate · auto 중 하나예요.")
-        return v
-
     @model_validator(mode="after")
     def validate_category(self):
         if "subcategory" in self.model_fields_set and "category" not in self.model_fields_set and self.subcategory is not None:
@@ -94,16 +84,6 @@ class ProductUpdate(BaseModel):
     category: Optional[str] = Field(default=None, max_length=20)
     subcategory: Optional[str] = Field(default=None, max_length=20)
     tea_form: Optional[str] = Field(default=None, max_length=20)  # 차만
-    # 배송비 방식 (2026-11-20) — included · separate 는 사람이 고른 값(manual, 자동이 안 덮음) · auto 는 자동 분류로 되돌림
-    shipping_mode: Optional[str] = None
-
-    @field_validator("shipping_mode")
-    @classmethod
-    def validate_shipping_mode(cls, v):
-        if v is not None and v not in ("included", "separate", "auto"):
-            raise ValueError("배송비 방식은 included · separate · auto 중 하나예요.")
-        return v
-
     @model_validator(mode="after")
     def validate_category(self):
         if "subcategory" in self.model_fields_set and "category" not in self.model_fields_set and self.subcategory is not None:

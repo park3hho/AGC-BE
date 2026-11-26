@@ -113,8 +113,6 @@ class CompetitorService:
                         return {"option_id": oid, "our_price": our}
                     sh = option_shipping(o.option1, o.option2, p.category, spec=o)
                     ship_cny = sh.get("shipping_cny")
-                    if getattr(p, "shipping_mode", None) == "separate":
-                        ship_cny = 0   # 배송비 별도형(마트형): 운임은 손님 배송비 9,900원으로 따로 받음 → 원가·최소가는 상품가만 (2026-11-21)
                     if ship_cny is None:
                         return {"option_id": oid, "option": f"{o.option1} {o.option2 or ''}".strip(), "our_price": our}
                     sib = sib_actual.get((o.product_id, str(o.price_cny)))   # 같은 제품·같은 조사가 형제 옵션(맛만 다름)의 실구매가

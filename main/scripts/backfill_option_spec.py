@@ -116,7 +116,7 @@ async def main(argv):
     has_cols = "spec_source" in cols
     sel = ", o.spec_source" if has_cols else ", null spec_source"
     rows = await conn.execute_query_dict(f"""select o.id, o.product_id, o.option1, o.option2{sel},
-        p.category, p.shipping_mode from product_option o join product p on p.id=o.product_id
+        p.category from product_option o join product p on p.id=o.product_id
         where o.deleted_at is null order by o.product_id, o.id""")
     fail, vague, diff, done, skipped = [], [], [], 0, 0
     for r in rows:
@@ -130,11 +130,9 @@ async def main(argv):
             fail.append((r, reason or "못 읽음"))
         elif reason:
             vague.append((r, res, reason))
-        # 예전 해석과 비교 — 마켓 스크립트(parse_spec × 별도형 unit_total) · 과자 parse_spec(기타 분류) · 배송비 용량
+        # 예전 해석과 비교 — 마켓 스크립트(parse_spec) · 과자 parse_spec(기타 분류) · 배송비 용량
         old = old_cp_spec(r["option2"])
         old_total = old["cnt"] if old else None
-        if old and r["shipping_mode"] == "separate":
-            old_total = old_unit_total(r["option2"], old_total)
         why = []
         if old and new_s:
             if (old["amt"], old["unit"]) != (new_s["amt"], new_s["unit"]):
@@ -171,7 +169,7 @@ async def main(argv):
             "| product_id | option_id | option1 | option2 | 해석 결과 | 사유 |", "|---|---|---|---|---|---|"]
     out += [f"| {r['product_id']} | {r['id']} | {cell(r['option1'])} | {cell(r['option2'])} | {cell(fmt_new(res))} | {cell(why)} |" for r, res, why in vague]
     out += ["", "## 3. 예전 해석과 다르게 나온 것", "",
-            "예전 = 마켓 스크립트 `parse_spec`(별도형은 `mart.unit_total` 보정 포함) · 과자 `parse_spec`(분류 other 만) · 배송비 `parse_volume_ml`(ml, option1+option2).",
+            "예전 = 마켓 스크립트 `parse_spec` · 과자 `parse_spec`(분류 other 만) · 배송비 `parse_volume_ml`(ml, option1+option2).",
             "새 해석이 맞으면 그대로 두고, 예전이 맞으면 옵션 PATCH 로 고친다.", "",
             "| product_id | option_id | option1 | option2 | 예전 parse_spec | 예전 과자 | 예전 용량ml | 새 해석 | 새 용량ml | 다른 곳 |",
             "|---|---|---|---|---|---|---|---|---|---|"]
