@@ -127,6 +127,27 @@ async def mark_delivered(order_id: int, auth=Depends(require_feature(Feature.ORD
         raise _fail("배송 완료 표시", e)
 
 
+class ShopRefundBody(BaseModel):
+    qty: int = Field(ge=1, le=100)
+    dry: bool = True
+    reason: Optional[str] = Field(default=None, max_length=200)
+
+
+@router.post("/{order_id}/shop-refund")
+async def shop_refund(order_id: int, body: ShopRefundBody, auth=Depends(require_feature(Feature.ORDER))):
+    """자사몰 일부 취소 · 환불 — 상품 금액 + 배송비 차액. dry=true 면 금액만 계산 (2026-11-27)."""
+    from services.order.shop_orders import shop_refund as do
+    try:
+        data = await do(order_id, body.qty, body.dry, body.reason)
+        if not body.dry:
+            logger.info(f"자사몰 일부 환불: order_id={order_id} qty={body.qty} refund={data.get('refund')} by={auth['user_id']}")
+        return success(**data)
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise _fail("자사몰 환불", e)
+
+
 @router.post("/{order_id}/confirm")
 async def confirm_order(order_id: int, auth=Depends(require_feature(Feature.ORDER))):
     """발주확인을 마켓에 보낸다 (쿠팡 상품준비중 · 네이버 발주 확인). 타오바오 구매 등록 전에 해야 한다."""
