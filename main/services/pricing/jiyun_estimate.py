@@ -200,7 +200,7 @@ def estimate_option(ctx: Ctx, option_id: int) -> dict:
                 "source": "measured", "note": f"실측 {len(own)}건"}
     sib = [m for m in ctx.meas if m["product_id"] == o.product_id and ctx.opts.get(m["option_id"]) and ctx.opts[m["option_id"]].volume_ml]
     if sib and o.volume_ml:
-        ra = _med(max(0.0, m["actual_g"] - BOX_G) / ctx.opts[m["option_id"]].volume_ml for m in sib)
+        ra = _med(max(0.0, m["actual_g"] - BOX_G) / ctx.opts[m["option_id"]].volume_ml for m in sib) or ctx.k_actual.get(o.category, 1.0)
         rd = _med((m["dim_g"] or 0) / ctx.opts[m["option_id"]].volume_ml for m in sib)
         return {"actual_g": o.volume_ml * ra + BOX_G, "dim_g": (o.volume_ml * rd if rd else None) or o.box_dim_g,
                 "source": "product", "note": f"같은 제품 다른 옵션 실측 {len(sib)}건 · 용량 비율"}
@@ -218,6 +218,9 @@ def estimate_option(ctx: Ctx, option_id: int) -> dict:
             knb = ctx.k_dim_nb.get(o.category)
             shared = {"dim_once_g": dim or 0}
             dim = o.volume_ml * knb if knb else 0
+            # 무거운 과자(비스킷 800g 등)는 가벼운 봉지칩 비율로 부피가 과하게 커지므로, 한 개분은 실측 상자 1개(중앙값)를 넘지 않게
+            if shared["dim_once_g"]:
+                dim = min(dim, shared["dim_once_g"])
         return {"actual_g": o.volume_ml * ka + (BOX_G if carton else 0), "box_once_g": 0 if carton else BOX_G,
                 "dim_g": dim, "source": "predicted", **shared,
                 "note": f"{o.category} 모델 · 1ml당 {ka:.2f}g" + (f" · 부피 1ml당 {kd:.2f}g" if kd and not o.box_dim_g else "")
@@ -298,3 +301,21 @@ def items_from_orders(orders: Iterable[dict], split: Optional[dict[int, int]] = 
                 u //= n
             out.append((oid, u))
     return out
+
+
+def apply_to(d: dict, ctx: Ctx, option_id: int, units: int = 1) -> dict:
+    """가격 책정 화면 옵션·묶음 dict 의 운임을 이 예측으로 바꾼다 (2026-11-27 — 마켓 판매가는 이 운임으로 매겼는데
+    화면은 예전 추정(용량+박스 500g)을 써서 차익이 다르게 보이던 것). 예전 값은 legacy_* 로 남긴다."""
+    from decimal import Decimal
+    from services.product.serializers import money_cny
+    e = estimate(ctx, [(option_id, units)])
+    return {
+        **d,
+        "legacy_shipping_cny": d.get("shipping_cny"), "legacy_weight_g": d.get("weight_g"),
+        "shipping_cny": money_cny(Decimal(str(e["fee_cny"]))),
+        "weight_g": e["actual_g"], "dim_weight_g": e["dim_g"], "billable_kg": format(e["billable_kg"], ".1f"),
+        "box_assumed": False, "over_limit": e["over_limit"],
+        "weight_source": "measured" if e["basis"] == ["measured"] else ("product" if e["basis"] == ["product"] else "estimate"),
+        "shipping_rate": e["rate"], "shipping_basis": e["basis"],
+        "shipping_note": "; ".join(l["note"] for l in e["items"]),
+    }

@@ -153,6 +153,12 @@ class PricingService:
         option_ids = [o.id for o in options]
         fx = await ExchangeRateService.current()
         measured = await measure_averages(option_ids)   # (옵션, 묶음 수) → 실측 평균 — 있으면 배송비는 실측 기준 (2026-11-18)
+        # 운임은 집운 운임 예측(services/pricing/jiyun_estimate)으로 — 마켓 판매가를 매긴 값과 같게 (2026-11-27)
+        from services.pricing import jiyun_estimate as je
+        ctx = await je.load_context()
+        opts = [je.apply_to(option_dict(o, p.category, measured.get((o.id, 1))), ctx, o.id, 1) for o in options]
+        bundles = [je.apply_to(b, ctx, b["option_id"], b["bundle_qty"])
+                   for b in await _bundles(p.id, options, p.code, p.category, measured)]
         return {
             "product": product_dict(p),
             "survey": (
@@ -160,8 +166,8 @@ class PricingService:
                 if survey else None
             ),
             "fx": fx,                                         # 현재 환율 — 원가·배송비 계산에 쓴다
-            "options": [option_dict(o, p.category, measured.get((o.id, 1))) for o in options],     # 옵션 + 배송비(위안) — 차는 부피 무게
-            "bundles": await _bundles(p.id, options, p.code, p.category, measured),   # 묶음 판매 옵션 (제안 + 저장된 것)
+            "options": opts,     # 옵션 + 배송비(위안, 집운 운임 예측)
+            "bundles": bundles,  # 묶음 판매 옵션 (제안 + 저장된 것)
             "pricings": await _pricings(
                 p.id, survey.id if survey else None, option_ids, list(Platform), fx["cny_krw"]
             ),
