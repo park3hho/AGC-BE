@@ -61,7 +61,8 @@ async def freight(body: FreightBody, auth=Depends(require_feature(Feature.RESEAR
                  for b in p["boxes"]]
         return success(fee_krw=sum(b["fee_krw"] for b in boxes), weight_g=p["weight_g"], boxes=boxes,
                        parts=p["parts"], units=sum(x.units for x in body.items),
-                       score=sum(burden_score(ctx, x.option_id) * x.units for x in body.items))
+                       # 사용자 11-27 "나누기 10" — 100g 단위 점수 ÷ 10, 소수 한 자리
+                       score=round(sum(burden_score(ctx, x.option_id) * x.units for x in body.items) / 10, 1))
     except HTTPException:
         raise
     except Exception as e:
