@@ -22,3 +22,38 @@ async def shop_pricing(auth=Depends(require_feature(Feature.RESEARCH))):
     except Exception as e:
         logger.error(f"자사몰 판매가 계산 실패: {type(e).__name__}: {e}")
         raise HTTPException(status_code=500, detail="처리 중 오류가 발생했습니다.")
+
+
+# ── 자사몰 장바구니 운임 (2026-11-27) — SHOP BE 가 서버끼리 부른다 (API 키, research 권한) ──
+from pydantic import BaseModel, Field   # noqa: E402
+
+from services.pricing import jiyun_estimate as je   # noqa: E402
+from services.pricing.exchange_rate_service import ExchangeRateService   # noqa: E402
+
+
+class FreightItem(BaseModel):
+    option_id: int
+    units: int = Field(default=1, ge=1, le=100)     # 기본 단위 개수 (sku 묶음 × 수량)
+
+
+class FreightBody(BaseModel):
+    items: list[FreightItem] = Field(min_length=1, max_length=50)
+
+
+@router.post("/freight")
+async def freight(body: FreightBody, auth=Depends(require_feature(Feature.RESEARCH))):
+    """장바구니 전체 → 가장 싼 상자 구성(je.pack)의 운임. 원화 = 위안 × 현재 환율, 원 단위 반올림.
+    응답에는 고객에게 보여 줄 값만 (상자별 무게 · 운임 원화, 총 무게). 원가 · 요율 구조는 내보내지 않는다."""
+    try:
+        ctx = await je.load_context()
+        p = je.pack(ctx, [(x.option_id, x.units) for x in body.items])
+        fx = float(await ExchangeRateService.current_rate())
+        boxes = [{"weight_g": b["weight_g"], "billable_kg": b["billable_kg"], "fee_krw": round(b["fee_cny"] * fx)}
+                 for b in p["boxes"]]
+        return success(fee_krw=sum(b["fee_krw"] for b in boxes), weight_g=p["weight_g"], boxes=boxes,
+                       parts=p["parts"], units=sum(x.units for x in body.items))
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"자사몰 운임 계산 실패: {type(e).__name__}: {e}")
+        raise HTTPException(status_code=500, detail="처리 중 오류가 발생했습니다.")

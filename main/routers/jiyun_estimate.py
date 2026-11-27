@@ -37,7 +37,7 @@ async def estimate(body: EstimateBody, auth=Depends(require_feature(Feature.ORDE
         return success(result=je.marginal(ctx, _t(body.items), _t(body.add)))
     if not body.items:
         raise HTTPException(status_code=400, detail="items 가 비었어요.")
-    return success(result=je.estimate(ctx, _t(body.items)))
+    return success(result=je.estimate(ctx, _t(body.items)), packing=je.pack(ctx, _t(body.items)))
 
 
 def _od(o: MarketOrder) -> dict:

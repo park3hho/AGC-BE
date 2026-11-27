@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import math
 import re
+from itertools import product
 from dataclasses import dataclass, field
 from datetime import datetime
 from statistics import median
@@ -274,6 +275,112 @@ def estimate(ctx: Ctx, items: list[tuple[int, int]]) -> dict:
         "over_limit": w / 1000 > MAX_KG,
         "basis": sorted({l["source"] for l in lines}),
     }
+
+
+# ── 상자 구성 최적화 (2026-11-27 사용자 "최저가를 계산해야") ──────────────────────────────────────
+# 상자마다 첫 1kg 기본요금(식품 ¥33)을 다시 받는다 → 상자 하나 ≈ ¥29 + ¥4×kg.
+#   목표: 쪼갤 수 없는 단위(옵션 1개)를 30kg 이하 상자들로 나눠 Σ 상자 요금 최소.
+#   상자 하나의 무게·요금은 estimate(그 상자에 든 단위) 그대로 (상자 무게 · 부피 모델 같이 씁).
+#   후보: 한 상자(30kg 넘으면 대형 수수료) · n0 = ⌈W/30⌉ 상자 · n0+1 상자. 단위 10개 이하는 전수 비교, 많으면 탐욕 + 교환 개선.
+OVERSIZE_CNY = 75.0      # 30kg 넘는 한 상자 대형 수수료 추정 (실측 41.45kg → ¥270, 일반 식 ¥195)
+EXACT_MAX_UNITS = 10
+OVERSIZE_MAX_KG = 45.0   # 30kg 넘는 한 상자는 실제로 보낸 적 있는 무게(41.45kg) 근처까지만 후보 — 그 이상은 상한을 몰라 나눠 보냄
+
+
+def _pack_key(units: list[int]) -> tuple:
+    return tuple(sorted(units))
+
+
+def pack(ctx: Ctx, items: list[tuple[int, int]]) -> dict:
+    """items = [(option_id, units)] → 가장 싼 상자 구성 {fee_cny, boxes:[{items, weight_g, billable_kg, fee_cny}], weight_g, parts, oversize}.
+    30kg 이하면 한 상자가 항상 최저 (상자를 늘리면 기본요금만큼 비싼다)."""
+    units = [oid for oid, n in items for _ in range(max(0, n))]
+    if not units:
+        return {"fee_cny": 0.0, "boxes": [], "weight_g": 0, "parts": 0, "oversize": False}
+    cache: dict[tuple, dict] = {}
+
+    def box(us: list[int]) -> dict:
+        k = _pack_key(us)
+        if k not in cache:
+            cnt: dict[int, int] = {}
+            for u in us:
+                cnt[u] = cnt.get(u, 0) + 1
+            e = estimate(ctx, list(cnt.items()))
+            w = e["weight_g"]
+            f = fee_cny(w, e["rate"]) + (OVERSIZE_CNY if w / 1000 > MAX_KG else 0)
+            cache[k] = {"items": sorted(cnt.items()), "weight_g": w, "billable_kg": billable_kg(w), "fee_cny": f,
+                        "rate": e["rate"], "over": w / 1000 > MAX_KG}
+        return cache[k]
+
+    whole = box(units)
+    if not whole["over"]:
+        return {"fee_cny": whole["fee_cny"], "boxes": [whole], "weight_g": whole["weight_g"], "parts": 1, "oversize": False}
+
+    def total(bs: list[list[int]]) -> float:
+        return sum(box(b)["fee_cny"] for b in bs)
+
+    def ok(bs: list[list[int]]) -> bool:
+        return all(b and not box(b)["over"] for b in bs)
+
+    def exact(n: int):
+        best = None
+        for assign in product(range(n), repeat=len(units) - 1):
+            bs: list[list[int]] = [[] for _ in range(n)]
+            bs[0].append(units[0])
+            for u, k in zip(units[1:], assign):
+                bs[k].append(u)
+            if not ok(bs):
+                continue
+            c = total(bs)
+            if best is None or c < best[0] - 1e-9:
+                best = (c, bs)
+        return best
+
+    def greedy(n: int):
+        bs: list[list[int]] = [[] for _ in range(n)]
+        for u in sorted(units, key=lambda u: -box([u])["weight_g"]):
+            cand = [k for k in range(n) if not box(bs[k] + [u])["over"]]
+            if not cand:
+                return None
+            k = min(cand, key=lambda k: box(bs[k] + [u])["fee_cny"] - (box(bs[k])["fee_cny"] if bs[k] else 0))
+            bs[k].append(u)
+        improved = True
+        while improved:
+            improved = False
+            for i in range(n):
+                for j in range(n):
+                    if i == j or improved:
+                        continue
+                    for xi, x in enumerate(bs[i]):
+                        for y in [None, *bs[j]]:
+                            bi = bs[i][:xi] + bs[i][xi + 1:] + ([y] if y is not None else [])
+                            bj = list(bs[j])
+                            if y is not None:
+                                bj.remove(y)
+                            bj.append(x)
+                            if ok([bi, bj]) and total([bi, bj]) < total([bs[i], bs[j]]) - 1e-9:
+                                bs[i], bs[j], improved = bi, bj, True
+                                break
+                        if improved:
+                            break
+        return (total(bs), bs) if ok(bs) else None
+
+    n0 = max(2, math.ceil(whole["weight_g"] / 1000 / MAX_KG))
+    options = [(whole["fee_cny"], [units])] if whole["weight_g"] / 1000 <= OVERSIZE_MAX_KG else []
+    found_at = None
+    for n in range(n0, len(units) + 1):   # 쪼갤 수 없는 단위라 ⌈W/30⌉ 상자에 안 들어갈 수 있다 → 들어가는 가장 적은 n 과 n+1
+        if found_at is not None and n > found_at + 1:
+            break
+        r = exact(n) if len(units) <= EXACT_MAX_UNITS and n ** (len(units) - 1) <= 200_000 else greedy(n)
+        if r:
+            options.append(r)
+            found_at = n if found_at is None else found_at
+    if not options:   # 이론상 없음 (단위 하나가 30kg 넘는 경우) — 한 상자로
+        options = [(whole["fee_cny"], [units])]
+    fee, bs = min(options, key=lambda r: r[0])
+    boxes = [box(b) for b in bs]
+    return {"fee_cny": round(fee, 2), "boxes": boxes, "weight_g": sum(b["weight_g"] for b in boxes),
+            "parts": len(boxes), "oversize": any(b["over"] for b in boxes)}
 
 
 def marginal(ctx: Ctx, current: list[tuple[int, int]], add: list[tuple[int, int]]) -> dict:
