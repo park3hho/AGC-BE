@@ -40,6 +40,15 @@ class FreightBody(BaseModel):
     items: list[FreightItem] = Field(min_length=1, max_length=50)
 
 
+def burden_score(ctx, option_id: int) -> int:
+    """운임부담점수 (2026-11-27 사용자: "kg 기준으로 하지 말고 운임부담점수라고 따로") — 고객 화면용, 무게를 드러내지 않는다.
+    옵션 1개 = 계산 무게(실제 · 부피 중 큰 값) 100g 당 1점, 올림. 장바구니 점수 = 점수 × 개수 합. 배송비 자체는 상자 구성(je.pack)으로 따로."""
+    import math
+    e = je.estimate_option(ctx, option_id)
+    g = max(e.get("actual_g") or 0, e.get("dim_g") or 0)
+    return max(1, math.ceil(g / 100)) if g else 1
+
+
 @router.post("/freight")
 async def freight(body: FreightBody, auth=Depends(require_feature(Feature.RESEARCH))):
     """장바구니 전체 → 가장 싼 상자 구성(je.pack)의 운임. 원화 = 위안 × 현재 환율, 원 단위 반올림.
@@ -51,7 +60,8 @@ async def freight(body: FreightBody, auth=Depends(require_feature(Feature.RESEAR
         boxes = [{"weight_g": b["weight_g"], "billable_kg": b["billable_kg"], "fee_krw": round(b["fee_cny"] * fx)}
                  for b in p["boxes"]]
         return success(fee_krw=sum(b["fee_krw"] for b in boxes), weight_g=p["weight_g"], boxes=boxes,
-                       parts=p["parts"], units=sum(x.units for x in body.items))
+                       parts=p["parts"], units=sum(x.units for x in body.items),
+                       score=sum(burden_score(ctx, x.option_id) * x.units for x in body.items))
     except HTTPException:
         raise
     except Exception as e:
