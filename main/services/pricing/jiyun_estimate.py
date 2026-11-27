@@ -59,9 +59,10 @@ def billable_kg(weight_g: float) -> float:
     return FIRST_KG + math.ceil(round((kg - FIRST_KG) / STEP_KG, 6)) * STEP_KG
 
 
-# 안전 기본요금 (2026-11-27 사용자 "33위안부터 시작하는데 안전하게 40위안부터") — 가격 계산·자사몰 배송비는 첫 1kg 을 ¥40 으로.
+# 안전 기본요금 (2026-11-27 사용자 "33위안부터 시작하는데 안전하게 40위안부터" → 같은 날 "비율 말고 그냥 35위안으로, 40 말고")
+#   — 가격 계산·자사몰 배송비는 첫 1kg 을 ¥35 정액으로 (그 뒤 0.5kg 당 ¥2 는 그대로).
 # 실제 타오바오 요금표(FIRST_CNY)는 실제 집운 기록 판별(rate_of)·대조(tariff=True)에만 쓴다.
-SAFE_FIRST_CNY = 40.0
+SAFE_FIRST_CNY = 35.0
 
 
 def fee_cny(weight_g: float, rate: str = "food", tariff: bool = False) -> float:
@@ -278,7 +279,7 @@ def estimate(ctx: Ctx, items: list[tuple[int, int]]) -> dict:
         "billable_kg": billable_kg(w), "fee_cny": fee, "parts": parts,
         "fee_cny_sum_max": fee_cny(smax, rate),          # 상자마다 큰 값 합 (보수적)
         "fee_cny_food": fee_cny(w, "food"), "fee_cny_general": fee_cny(w, "general"),
-        # 실제 타오바오 요금표 기준(안전 기본요금 ¥40 없이) — 실제 집운 대조용
+        # 실제 타오바오 요금표 기준(안전 기본요금 ¥35 없이) — 실제 집운 대조용
         "tariff_cny": (fee_cny(w / parts, rate, True) * parts),
         "tariff_cny_food": fee_cny(w, "food", True), "tariff_cny_general": fee_cny(w, "general", True),
         "over_limit": w / 1000 > MAX_KG,
