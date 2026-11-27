@@ -56,10 +56,11 @@ def _iso(v):
 
 
 async def jiyun_dict(j: JiyunShipment) -> dict:
-    await j.fetch_related("order")
+    await j.fetch_related("order", "bundle")
     o = j.order
     return {
         "id": j.id,
+        "bundle_code": j.bundle.code if j.bundle else (o.bundle_key or None),   # 자사 집운번호 PRE_LP… (2026-11-27 사용자: 화면에 보이게)
         "order": {"id": o.id, "code": o.code, "market": o.market, "order_no": o.order_no, "line_no": o.line_no,
                   "product_name": o.product_name, "option_name": o.option_name, "quantity": o.quantity},
         "jiyun_no": j.jiyun_no, "status": j.status, "packages": j.packages or [],
