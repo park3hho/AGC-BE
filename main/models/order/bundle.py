@@ -17,7 +17,10 @@ class JiyunBundle(BaseModel):
     status = fields.CharField(max_length=12, default="open")        # open · confirmed · paid · dispatched · done · cancelled
     lp_no = fields.CharField(max_length=60, null=True)              # 집운 물류 주문번호(LP…) — 결제 기록에서 -2/-3 뗀 번호 1개
     jiyun_trade_id = fields.CharField(max_length=60, null=True)     # 타오바오 집운 결제 주문번호 (tradeId)
-    est_weight_g = fields.IntField(null=True)                       # 구성 주문 예상 무게 합 (조사 옵션 용량 × 타오바오 개수 + 상자)
+    est_weight_g = fields.IntField(null=True)
+    # 상자 구성 (2026-11-27 사용자: 묶음 번호 = 30kg 이하 상자 하나, 가장 싼 구성 — services/pricing/jiyun_estimate.pack)
+    contents = fields.JSONField(default=list)                       # [{order_id, order_code, option_id, units, label}] 이 상자에 넣을 것
+    est_fee_cny = fields.DecimalField(max_digits=10, decimal_places=2, null=True)   # 이 상자 예상 집운비                       # 구성 주문 예상 무게 합 (조사 옵션 용량 × 타오바오 개수 + 상자)
     confirmed_at = fields.DatetimeField(null=True)
     paid_at = fields.DatetimeField(null=True)
     dispatched_at = fields.DatetimeField(null=True)

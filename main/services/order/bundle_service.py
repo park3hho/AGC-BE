@@ -94,8 +94,79 @@ async def _attach(o: MarketOrder, b: JiyunBundle) -> None:
     await o.save(update_fields=["jiyun_bundle_id", "bundle_key", "updated_at"])
 
 
+# ── 상자 구성 다시 짜기 (2026-11-27 사용자: "자사 집운번호를 30kg 단위 상자마다 하나씩, 어떤 제품이 들어갈지 FE 에 보여 주면 그걸로 집운 결제") ──
+#   같은 받는 사람의 open 묶음(결제 전 · 확정 전)에 든 주문 단위를 jiyun_estimate.pack 으로 가장 싼 상자 구성으로 나눈다.
+#   상자 1개 = 묶음 번호 1개. 기존 open 번호는 그대로 재사용(번호가 자꾸 바뀌지 않게), 모자라면 새 번호.
+#   한 주문이 여러 상자로 나뉘면(예: 15병 × 4 = 33.8kg) 주문의 묶음(FK)은 첫 상자, 각 상자의 contents 에 넣을 개수.
+#   확정(confirmed) 이후 묶음은 건드리지 않는다.
+async def replan(key: str, is_test: bool) -> list[JiyunBundle]:
+    from services.pricing import jiyun_estimate as je
+    bundles = await JiyunBundle.filter(receiver_key=key, is_test=is_test, status="open").order_by("id")
+    if not bundles:
+        return []
+    orders: list[MarketOrder] = []
+    for b in bundles:
+        if await JiyunShipment.filter(bundle_id=b.id, deleted_at=None).exclude(status="cancelled").exists():
+            return bundles   # 이미 집운 결제가 시작된 묶음이 있으면 그대로 (사람이 진행 중)
+        orders += [m for m in await _members(b) if m not in orders]
+    orders.sort(key=lambda m: m.id)
+    pool: list[tuple[MarketOrder, int, int]] = []           # (주문, 옵션, 단위 수)
+    unknown: list[MarketOrder] = []
+    for m in orders:
+        it = je.items_from_orders([{"id": m.id, "seller_code": m.seller_code, "quantity": m.quantity}])
+        if it:
+            pool.append((m, it[0][0], it[0][1]))
+        else:
+            unknown.append(m)
+    if not pool:
+        return bundles
+    ctx = await je.load_context()
+    agg: dict[int, int] = {}
+    for _, oid, n in pool:
+        agg[oid] = agg.get(oid, 0) + n
+    plan = je.pack(ctx, list(agg.items()))
+    boxes = sorted(plan["boxes"], key=lambda b: -b["weight_g"])
+    # 상자마다 옵션 개수를 주문 순서대로 채운다
+    left = [[m, oid, n] for m, oid, n in pool]
+    while len(bundles) < len(boxes):
+        bundles.append(await JiyunBundle.create(code=await new_code(), receiver_key=key, is_test=is_test, status="open"))
+    first_box: dict[int, JiyunBundle] = {}
+    for bx, b in zip(boxes, bundles):
+        contents = []
+        for oid, need in bx["items"]:
+            for row in left:
+                if need <= 0:
+                    break
+                m, roid, have = row
+                if roid != oid or have <= 0:
+                    continue
+                take = min(have, need)
+                row[2] -= take
+                need -= take
+                o = ctx.opts.get(oid)
+                contents.append({"order_id": m.id, "order_code": m.code, "option_id": oid, "units": take,
+                                 "label": f"{o.title} · {o.label}"[:120] if o else m.product_name[:120]})
+                first_box.setdefault(m.id, b)
+        b.contents = contents
+        b.est_fee_cny = bx["fee_cny"]
+        b.est_weight_g = bx["weight_g"]
+        await b.save(update_fields=["contents", "est_fee_cny", "est_weight_g", "updated_at"])
+    for m in unknown:   # 옵션을 못 읽은 주문은 가장 가벼운 상자에
+        first_box.setdefault(m.id, bundles[len(boxes) - 1])
+    for m in orders:
+        b = first_box.get(m.id)
+        if b and m.jiyun_bundle_id != b.id:
+            await _attach(m, b)
+    for b in bundles[len(boxes):]:   # 남는 빈 open 묶음
+        b.contents, b.est_fee_cny = [], None
+        await b.save(update_fields=["contents", "est_fee_cny", "updated_at"])
+    for b in bundles:
+        await recompute(b, plan_ok=True)
+    return bundles[:len(boxes)]
+
+
 async def assign(o: MarketOrder) -> JiyunBundle | None:
-    """새 주문을 묶음에 — 같은 받는 사람의 open 묶음(무게 여유가 있으면) 또는 새 묶음."""
+    """새 주문을 묶음에 — 같은 받는 사람의 open 묶음에 넣고, 그 사람 open 묶음 전체를 가장 싼 상자 구성으로 다시 짠다."""
     if o.jiyun_bundle_id:
         return await JiyunBundle.get_or_none(id=o.jiyun_bundle_id)
     if not o.code or o.stage in ("done", "cancelled"):
@@ -112,18 +183,33 @@ async def assign(o: MarketOrder) -> JiyunBundle | None:
         target = await JiyunBundle.create(code=await new_code(), receiver_key=key, is_test=o.is_test, status="open")
     await _attach(o, target)
     await recompute(target)
+    if _norm(o.receiver_name) and _norm(o.receiver_zip):
+        try:
+            await replan(key, o.is_test)
+            await o.refresh_from_db()
+            return await JiyunBundle.get_or_none(id=o.jiyun_bundle_id) or target
+        except Exception as e:   # 구성 계산이 실패해도 묶음 배정은 살린다
+            logger.warning(f"상자 구성 계산 실패 {o.code}: {type(e).__name__}: {e}")
     return target
 
 
-async def recompute(b: JiyunBundle) -> JiyunBundle:
+async def recompute(b: JiyunBundle, plan_ok: bool = False) -> JiyunBundle:
     """사실로 상태 다시 정하기 — 취소 주문 빼기(결제 전) · 집운 기록 연결 · LP 번호 · 예상 무게 · 상태."""
     every = await _members(b, alive_only=False)
+    dropped = False
     if b.status in OPEN:   # 결제 전 — 취소된 주문은 묶음에서 뺀다
         for m in every:
             if m.stage == "cancelled":
                 m.jiyun_bundle_id = None
                 m.bundle_key = None
                 await m.save(update_fields=["jiyun_bundle_id", "bundle_key", "updated_at"])
+                dropped = True
+    if dropped and b.status == "open" and not plan_ok:   # 빠진 주문이 있으면 상자 구성 다시
+        try:
+            await replan(b.receiver_key, b.is_test)
+            await b.refresh_from_db()
+        except Exception as e:
+            logger.warning(f"상자 구성 다시 계산 실패 {b.code}: {type(e).__name__}")
     members = await _members(b)
     ids = [m.id for m in members] or [m.id for m in every]
     ships = await JiyunShipment.filter(order_id__in=ids, deleted_at=None).exclude(status="cancelled").order_by("id") if ids else []
@@ -131,8 +217,9 @@ async def recompute(b: JiyunBundle) -> JiyunBundle:
         if j.bundle_id != b.id:
             j.bundle_id = b.id
             await j.save(update_fields=["bundle_id", "updated_at"])
-    weights = [await order_weight_g(m) for m in members]
-    b.est_weight_g = sum(x for x in weights if x) or None
+    if not (b.status == "open" and b.contents):   # 상자 구성이 있으면 그 무게(replan)가 정본
+        weights = [await order_weight_g(m) for m in members]
+        b.est_weight_g = sum(x for x in weights if x) or None
     now = datetime.now(timezone.utc)
     if ships:
         b.lp_no = b.lp_no or _base_no(ships[0].jiyun_no)
@@ -144,6 +231,8 @@ async def recompute(b: JiyunBundle) -> JiyunBundle:
             b.dispatched_at = b.dispatched_at or ships[0].dispatched_at or now
         else:
             b.status = "paid"
+    elif not members and b.status == "open" and b.contents:   # 나뉜 주문의 둘째 상자 (주문 FK 는 첫 상자)
+        pass
     elif not members:
         b.status = "cancelled"
     elif all(m.stage == "done" for m in members):   # 집운 기록 없이 끝난 예전 주문
@@ -187,7 +276,11 @@ async def bundle_dict(b: JiyunBundle, detail: bool = False) -> dict:
          "codes": [m.code for m in members if m.stage != "cancelled"],
          "arrived": arrived, "total": total, "ready": total > 0 and arrived >= total,
          "created_at": b.created_at.isoformat(), "confirmed_at": b.confirmed_at.isoformat() if b.confirmed_at else None,
-         "paid_at": b.paid_at.isoformat() if b.paid_at else None, "memo": b.memo}
+         "paid_at": b.paid_at.isoformat() if b.paid_at else None, "memo": b.memo,
+         "contents": b.contents or [], "est_fee_cny": float(b.est_fee_cny) if b.est_fee_cny is not None else None}
+    if not d["codes"] and d["contents"]:   # 나뉜 주문의 둘째 상자
+        d["codes"] = sorted({c["order_code"] for c in d["contents"]})
+        d["size"] = len(d["codes"])
     if detail:
         from services.order.pccc import mask_name
         ships = await JiyunShipment.filter(bundle_id=b.id, deleted_at=None).order_by("id")
