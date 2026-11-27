@@ -41,6 +41,22 @@ class _Common(BaseModel):
     item_url: Optional[str] = Field(default=None, max_length=508)
     items: list[PurchaseItemIn] = Field(default_factory=list, max_length=PURCHASE_ITEMS_MAX)
     paid_cny: Optional[Decimal] = Field(default=None, ge=0, le=Decimal("9999999"), decimal_places=2)
+    # 할인 줄 [{name, cny, multi}] — 수량 조건 할인은 multi=true (매입가 계산에서 되돌려 더함). 비우면 모름, [] 이면 할인 없음
+    discounts: Optional[list[dict]] = Field(default=None, max_length=20)
+
+    @field_validator("discounts")
+    @classmethod
+    def clean_discounts(cls, v):
+        if v is None:
+            return None
+        out = []
+        for d in v:
+            try:
+                cny = round(abs(float(d.get("cny") or 0)), 2)
+            except (TypeError, ValueError):
+                raise ValueError("할인 금액(cny)은 숫자로 넣어 주세요.")
+            out.append({"name": str(d.get("name") or "")[:60], "cny": cny, "multi": bool(d.get("multi"))})
+        return out
     purchased_at: Optional[datetime] = None
     pay_method: Optional[str] = None                                    # core/purchase_config.PAY_METHOD
     pay_currency: Optional[str] = None                                  # USD · KRW · CNY

@@ -81,11 +81,10 @@ async def apply_prices(auth=Depends(require_feature(Feature.RESEARCH))):
 
 @router.post("/cost-backfill")
 async def cost_backfill(auth=Depends(require_feature(Feature.RESEARCH))):
-    """매입가 = 최근 실구매 1단위가 — 지금까지 구매 기록으로 한 번 적용 (2026-11-27). 바뀐 옵션 · 제외 건수."""
+    """매입가 차이 비교 · 이력만 — 지금까지 구매를 지금 매입가와 비교해 이슈 리포트에 남김 (매입가는 안 바꿈, 2026-11-27)."""
     from services.order.cost_sync import backfill
     try:
         d = await backfill()
-        d["changed"] = [{**c, "old": str(c["old"]) if c["old"] is not None else None, "new": str(c["new"])} for c in d["changed"]]
         return success(**d)
     except Exception as e:
         logger.exception("매입가 백필 실패")

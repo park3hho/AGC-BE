@@ -91,8 +91,11 @@ async def record_prices(survey_id: int, pairs: list[tuple[ProductOption, Decimal
             await r.save(using_db=conn, update_fields=["price_cny", "updated_at"])
 
 
-async def refresh_current_prices(product_id: int, conn) -> None:
-    """product_option.price_cny = 살아 있는 조사 중 최근 조사(조사일 → id 큰 순)에서 본 값. 본 적 없으면 그대로."""
+async def refresh_current_prices(product_id: int, conn, reason: str = "가격조사 반영") -> None:
+    """product_option.price_cny = 살아 있는 조사 중 최근 조사(조사일 → id 큰 순)에서 본 값. 본 적 없으면 그대로.
+    바뀐 옵션은 매입가 이력(option_cost_log, source=manual, 이전 → 새)에 남긴다 (2026-11-27)."""
+    q = "select id, price_cny from product_option where product_id = $1"
+    before = {r["id"]: r["price_cny"] for r in await conn.execute_query_dict(q, [product_id])}
     await conn.execute_query(
         """
         update product_option o set price_cny = x.price_cny, updated_at = now()
@@ -106,6 +109,13 @@ async def refresh_current_prices(product_id: int, conn) -> None:
         """,
         [product_id],
     )
+    after = {r["id"]: r["price_cny"] for r in await conn.execute_query_dict(q, [product_id])}
+    if any(before.get(k) != v for k, v in after.items()):
+        try:
+            from services.order.cost_sync import log_manual_changes
+            await log_manual_changes(before, after, reason)
+        except Exception:
+            pass
 
 
 async def used_by_listings(product_id: int, option_ids: set[int]) -> list[str]:

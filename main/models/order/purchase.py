@@ -17,6 +17,9 @@ class TaobaoPurchase(BaseModel):
     item_url = fields.CharField(max_length=500, null=True)          # 산 상품 페이지
     items = fields.JSONField(default=list)                          # [{name, qty, price_cny}] — 옵션(맛·용량)·수량·단가
     paid_cny = fields.DecimalField(max_digits=12, decimal_places=2, null=True)   # 실제 결제 위안 (할인·배송비 반영 합계)
+    # 주문서 付款详情 할인 줄 (2026-11-27 Manager2 "보완 ㄱ") — [{name, cny, multi}]. multi=수량 조건 할인(满N件·N件折·第二件).
+    # null = 기록 안 함(모름), [] = 할인 없음. 매입가 1단위가 = (paid_cny + Σ multi 할인) ÷ 단위 수 (services/order/cost_sync.py)
+    discounts = fields.JSONField(null=True)
     purchased_at = fields.DatetimeField(null=True)
 
     # 실제 결제 — 결제창 금액(통화 그대로)과 카드사·카카오페이가 실제로 청구한 원화 (2026-10-25)

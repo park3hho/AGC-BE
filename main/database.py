@@ -28,6 +28,7 @@ TORTOISE_ORM = {
                 "models.order.stock",   # 집운 가용재고 — 취소됐지만 환불 못 받은 소포를 다음 같은 주문에 씀 (2026-11-18)
                 "models.order.measure",
                 "models.ops.alert",
+                "models.ops.issue",       # 이슈 리포트 (2026-11-27)
                 "models.order.alipay",   # 알리페이 잔액 장부 — 충전 위안·원화, 결제는 선입선출 환율로 원화 계산 (2026-11-20)   # AI·서버 알림 기록 — 같은 알림 두 번 안 보내기 (2026-11-19)   # 옵션별 실측 — 보낸 상자의 무게·크기, 배송비 계산용 비공개 (2026-11-18)
                 "aerich.models",
             ],

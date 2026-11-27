@@ -11,7 +11,7 @@ CN_STATUS = {
 
 # 기록(OrderEvent)에 이전값 → 새값으로 남길 칸
 PURCHASE_TRACKED = (
-    "taobao_order_no", "shop_name", "item_url", "items", "paid_cny", "purchased_at", "purchased_by_id",
+    "taobao_order_no", "shop_name", "item_url", "items", "paid_cny", "discounts", "purchased_at", "purchased_by_id",
     "cn_status", "shipped_at", "cn_courier", "cn_tracking_no", "arrived_at", "status_source", "memo",
     "pay_method", "pay_currency", "pay_amount", "charged_krw", "charged_status", "charged_at", "charged_source",
     "package_count", "refund_status", "refund_no", "refund_cny", "refund_requested_at", "refund_done_at",

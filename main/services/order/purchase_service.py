@@ -57,6 +57,7 @@ async def purchase_dict(p: TaobaoPurchase) -> dict:
                   "product_name": o.product_name, "option_name": o.option_name, "quantity": o.quantity},
         "taobao_order_no": p.taobao_order_no, "shop_name": p.shop_name, "item_url": p.item_url,
         "items": p.items or [], "paid_cny": _plain(p.paid_cny) if p.paid_cny is not None else None,
+        "discounts": p.discounts,
         "purchased_at": _iso(p.purchased_at),
         "purchased_by": {"id": p.purchased_by.id, "name": p.purchased_by.name} if p.purchased_by else None,
         "cn_status": p.cn_status, "shipped_at": _iso(p.shipped_at), "cn_courier": p.cn_courier,
@@ -190,7 +191,7 @@ class TaobaoPurchaseService:
         await restage(order, actor, "타오바오 구매 기록")   # 구매 기록이 생기면 접수 → 처리
         fin_expense.kick()   # FIN 지출 원장으로 (2026-10-30)
         await __import__("services.order.alipay_ledger", fromlist=["apply_now"]).apply_now()   # 알리페이 잔액 선입선출 — 같은 요청 안에서 바로 차감 (2026-11-20)
-        await __import__("services.order.cost_sync", fromlist=["on_purchase"]).on_purchase(p.id)   # 매입가 = 최근 실구매 1단위가 (2026-11-27)
+        await __import__("services.order.cost_sync", fromlist=["on_purchase"]).on_purchase(p.id)   # 매입가 차이 비교 → 이슈 리포트 (매입가는 안 바꿈, 2026-11-27)
         await p.refresh_from_db()
         return await purchase_dict(p)
 
@@ -243,7 +244,7 @@ class TaobaoPurchaseService:
                 pass
         fin_expense.kick()
         await __import__("services.order.alipay_ledger", fromlist=["apply_now"]).apply_now()   # 알리페이 잔액 선입선출 — 같은 요청 안에서 바로 차감 (2026-11-20)
-        await __import__("services.order.cost_sync", fromlist=["on_purchase"]).on_purchase(p.id)   # 매입가 = 최근 실구매 1단위가 (2026-11-27)
+        await __import__("services.order.cost_sync", fromlist=["on_purchase"]).on_purchase(p.id)   # 매입가 차이 비교 → 이슈 리포트 (매입가는 안 바꿈, 2026-11-27)
         await p.refresh_from_db()
         return await purchase_dict(p)
 
@@ -264,4 +265,4 @@ class TaobaoPurchaseService:
         await restage(order, actor, "타오바오 구매 기록 삭제")   # 남은 구매 기록이 없으면 처리 → 접수
         fin_expense.kick()
         await __import__("services.order.alipay_ledger", fromlist=["apply_now"]).apply_now()   # 알리페이 잔액 선입선출 — 같은 요청 안에서 바로 차감 (2026-11-20)
-        await __import__("services.order.cost_sync", fromlist=["on_purchase"]).on_purchase(p.id)   # 매입가 = 최근 실구매 1단위가 (2026-11-27)
+        await __import__("services.order.cost_sync", fromlist=["on_purchase"]).on_purchase(p.id)   # 매입가 차이 비교 → 이슈 리포트 (매입가는 안 바꿈, 2026-11-27)
