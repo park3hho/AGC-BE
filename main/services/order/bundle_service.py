@@ -262,6 +262,12 @@ async def sync_all() -> int:
 
 
 # ------------------------------------------------------------ 화면용
+def _receiver_label(key: str | None) -> str:
+    """받는 사람 표시 — 이름 가림 · 우편번호 (예: 김*수 · 31452). 결제 대기 상자 받는 사람별 묶음용."""
+    from services.order.pccc import mask_name
+    name, _, zip_ = (key or "").partition("|")
+    return " · ".join(x for x in (mask_name(name) if name else "", zip_) if x) or "받는 사람 미확인"
+
 async def bundle_dict(b: JiyunBundle, detail: bool = False) -> dict:
     members = await _members(b, alive_only=not detail)
     ids = [m.id for m in members]
@@ -277,6 +283,7 @@ async def bundle_dict(b: JiyunBundle, detail: bool = False) -> dict:
          "arrived": arrived, "total": total, "ready": total > 0 and arrived >= total,
          "created_at": b.created_at.isoformat(), "confirmed_at": b.confirmed_at.isoformat() if b.confirmed_at else None,
          "paid_at": b.paid_at.isoformat() if b.paid_at else None, "memo": b.memo,
+         "receiver_label": _receiver_label(b.receiver_key),
          "contents": b.contents or [], "est_fee_cny": float(b.est_fee_cny) if b.est_fee_cny is not None else None}
     if not d["codes"] and d["contents"]:   # 나뉜 주문의 둘째 상자
         d["codes"] = sorted({c["order_code"] for c in d["contents"]})
