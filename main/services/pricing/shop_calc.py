@@ -65,3 +65,38 @@ async def calc() -> dict:
         })
     return {"fx": f"{fx:.2f}", "rule": {"markup": "1.1", "pay_fee_pct": "3.52", "round_to": ROUND_TO,
                                         "divisor": DIVISOR}, "items": items, "total": len(items)}
+
+
+async def apply() -> dict:
+    """자사몰 판매가 저장 (2026-11-27 사용자: "전부 한번에" — 배송비 별도 전환). shop_sale_price 를 다시 채운다.
+    대상 = 지금 자사몰 · 네이버 가격 책정에 들어 있는 옵션(묶음이었던 옵션도 기본 단위 1개로) 중 원가가 있는 것.
+    매일 환율 받은 뒤 다시 돈다 (exchange_rate_service.fx_auto_loop). 바뀐 개수 · 빠진 개수를 돌려준다."""
+    from models.product.pricing import ShopSalePrice
+    fx = await ExchangeRateService.current_rate()
+    conn = Tortoise.get_connection("default")
+    rows = await conn.execute_query_dict(
+        """select distinct o.id option_id, o.product_id, o.price_cny
+           from public.product_pricing pp
+           join public.option_price x on x.pricing_id = pp.id
+           join public.product_option o on o.id = x.option_id and o.deleted_at is null
+           join public.product p on p.id = o.product_id and p.deleted_at is null
+           where pp.platform in ('shop', 'naver') and o.price_cny is not null and o.price_cny > 0""")
+    old = {r.option_id: r for r in await ShopSalePrice.all()}
+    keep, changed, added = set(), 0, 0
+    for r in rows:
+        cny = Decimal(str(r["price_cny"]))
+        price = shop_price(cny * fx)
+        keep.add(r["option_id"])
+        cur = old.get(r["option_id"])
+        if cur is None:
+            await ShopSalePrice.create(option_id=r["option_id"], product_id=r["product_id"], price=price,
+                                       cost_cny=cny, fx=fx)
+            added += 1
+        elif cur.price != price or cur.cost_cny != cny or cur.product_id != r["product_id"]:
+            cur.price, cur.cost_cny, cur.fx, cur.product_id = price, cny, fx, r["product_id"]
+            await cur.save()
+            changed += 1
+    gone = [i for i in old if i not in keep]
+    if gone:
+        await ShopSalePrice.filter(option_id__in=gone).delete()
+    return {"fx": f"{fx:.2f}", "total": len(keep), "added": added, "changed": changed, "removed": len(gone)}

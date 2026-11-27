@@ -165,3 +165,8 @@ async def fx_auto_loop() -> None:
         now = datetime.now(KST)
         await asyncio.sleep((_next_daily_run(now) - now).total_seconds())
         await _refresh_with_retry()
+        try:   # 자사몰 판매가 = 오늘 환율 기준 (2026-11-27, 배송비 별도 전환)
+            from services.pricing.shop_calc import apply
+            logger.info(f"자사몰 판매가 갱신 {await apply()}")
+        except Exception as ex:
+            logger.warning(f"자사몰 판매가 갱신 실패: {type(ex).__name__}: {ex}")

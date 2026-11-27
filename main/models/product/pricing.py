@@ -1,4 +1,5 @@
 from tortoise import fields
+from tortoise.models import Model
 
 from core.pricing_config import DEFAULT_FX_MARKUP_PCT, DEFAULT_FX_RATE, DEFAULT_SHIPPING_FEE, Platform
 from models.base import BaseModel
@@ -92,3 +93,17 @@ class ProductBundle(BaseModel):
     class Meta:
         table = "product_bundle"
         unique_together = (("option", "bundle_qty"),)
+
+class ShopSalePrice(Model):
+    """자사몰 판매가 — 배송비 별도 (2026-11-27 사용자: "전부 한번에"). services/pricing/shop_calc.apply() 가 채운다.
+    옵션 1개 = 기본 단위 1개, 묶음 없음. 가격 = 원가(price_cny × 환율) × 1.1 ÷ (1 − 3.52%), 100원 올림.
+    SHOP-BE catalog 가 읽는다 (shop_app SELECT). 배송비는 주문 때 장바구니 전체로 따로 (jiyun_estimate.pack)."""
+    option_id = fields.IntField(primary_key=True)
+    product_id = fields.IntField(index=True)
+    price = fields.IntField()
+    cost_cny = fields.DecimalField(max_digits=10, decimal_places=2)
+    fx = fields.DecimalField(max_digits=8, decimal_places=2)
+    updated_at = fields.DatetimeField(auto_now=True)
+
+    class Meta:
+        table = "shop_sale_price"

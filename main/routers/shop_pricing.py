@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from core.auth_deps import require_feature
 from core.permissions import Feature
 from core.response_utils import success
-from services.pricing.shop_calc import calc
+from services.pricing.shop_calc import apply, calc
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/shop-pricing", tags=["ShopPricing"])
@@ -57,3 +57,13 @@ async def freight(body: FreightBody, auth=Depends(require_feature(Feature.RESEAR
     except Exception as e:
         logger.error(f"자사몰 운임 계산 실패: {type(e).__name__}: {e}")
         raise HTTPException(status_code=500, detail="처리 중 오류가 발생했습니다.")
+
+
+@router.post("/apply")
+async def apply_prices(auth=Depends(require_feature(Feature.RESEARCH))):
+    """자사몰 판매가 저장 — 배송비 별도 가격 (shop_sale_price). 매일 환율 갱신 뒤에도 자동으로 돈다."""
+    try:
+        return success(**await apply())
+    except Exception as e:
+        logger.exception("자사몰 판매가 저장 실패")
+        raise HTTPException(status_code=500, detail=f"자사몰 판매가 저장 실패: {type(e).__name__}")
