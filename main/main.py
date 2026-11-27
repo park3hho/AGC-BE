@@ -16,6 +16,7 @@ from services.order.order_service import order_poll_loop
 from services.ops.auto_loop import ops_auto_loop
 from routers import ops as ops_router   # 30분 점검 규칙화 (2026-11-19)
 from routers import alipay as alipay_router   # 알리페이 잔액 장부 (2026-11-20)
+from routers import shop_pricing as shop_pricing_router   # 자사몰 판매가 계산 (2026-11-27)
 from routers import (
     import_decl,
     company_reminder,
@@ -113,6 +114,7 @@ app.include_router(shipping.router)
 app.include_router(import_decl.router)   # 수입식품 구매대행 수입신고 (2026-11-11)
 app.include_router(ops_router.router)   # 30분 점검 할 일 · AI 알림 기록 (2026-11-19)
 app.include_router(alipay_router.router)   # 알리페이 잔액 장부 — 선입선출 환율 (2026-11-20)
+app.include_router(shop_pricing_router.router)   # 가격 책정 › 자사몰 판매 계산 (2026-11-27)
 app.include_router(upload.router)
 
 # 업로드된 사진 내려주기 — /files/photos/2026/10/xxx.jpg
