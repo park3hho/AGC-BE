@@ -190,6 +190,7 @@ class TaobaoPurchaseService:
         await restage(order, actor, "타오바오 구매 기록")   # 구매 기록이 생기면 접수 → 처리
         fin_expense.kick()   # FIN 지출 원장으로 (2026-10-30)
         await __import__("services.order.alipay_ledger", fromlist=["apply_now"]).apply_now()   # 알리페이 잔액 선입선출 — 같은 요청 안에서 바로 차감 (2026-11-20)
+        await __import__("services.order.cost_sync", fromlist=["on_purchase"]).on_purchase(p.id)   # 매입가 = 최근 실구매 1단위가 (2026-11-27)
         await p.refresh_from_db()
         return await purchase_dict(p)
 
@@ -242,6 +243,7 @@ class TaobaoPurchaseService:
                 pass
         fin_expense.kick()
         await __import__("services.order.alipay_ledger", fromlist=["apply_now"]).apply_now()   # 알리페이 잔액 선입선출 — 같은 요청 안에서 바로 차감 (2026-11-20)
+        await __import__("services.order.cost_sync", fromlist=["on_purchase"]).on_purchase(p.id)   # 매입가 = 최근 실구매 1단위가 (2026-11-27)
         await p.refresh_from_db()
         return await purchase_dict(p)
 
@@ -262,3 +264,4 @@ class TaobaoPurchaseService:
         await restage(order, actor, "타오바오 구매 기록 삭제")   # 남은 구매 기록이 없으면 처리 → 접수
         fin_expense.kick()
         await __import__("services.order.alipay_ledger", fromlist=["apply_now"]).apply_now()   # 알리페이 잔액 선입선출 — 같은 요청 안에서 바로 차감 (2026-11-20)
+        await __import__("services.order.cost_sync", fromlist=["on_purchase"]).on_purchase(p.id)   # 매입가 = 최근 실구매 1단위가 (2026-11-27)

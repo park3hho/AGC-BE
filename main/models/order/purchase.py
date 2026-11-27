@@ -75,3 +75,20 @@ class PurchasePackage(BaseModel):
 
     class Meta:
         table = "purchase_package"
+
+
+class OptionCostLog(BaseModel):
+    """매입가 자동 갱신 이력 (2026-11-27 사용자 "마지막 매입가 연동해", Manager2 전달).
+    타오바오 구매 1건 → 그 주문 옵션의 1단위가 = paid_cny ÷ (seller_code 묶음 × 주문 수량).
+    applied=True 면 product_option.price_cny 를 old → new 로 바꿈, False 면 reason(제외 사유)만 남김."""
+    option_id = fields.IntField(null=True, index=True)
+    purchase_id = fields.IntField(index=True)
+    order_id = fields.IntField(null=True)
+    old_cny = fields.DecimalField(max_digits=12, decimal_places=2, null=True)
+    new_cny = fields.DecimalField(max_digits=12, decimal_places=2, null=True)
+    applied = fields.BooleanField(default=False)
+    reason = fields.CharField(max_length=100, null=True)
+    source = fields.CharField(max_length=10, default="auto")   # auto(구매 저장) · backfill
+
+    class Meta:
+        table = "option_cost_log"

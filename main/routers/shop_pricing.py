@@ -67,3 +67,15 @@ async def apply_prices(auth=Depends(require_feature(Feature.RESEARCH))):
     except Exception as e:
         logger.exception("자사몰 판매가 저장 실패")
         raise HTTPException(status_code=500, detail=f"자사몰 판매가 저장 실패: {type(e).__name__}")
+
+@router.post("/cost-backfill")
+async def cost_backfill(auth=Depends(require_feature(Feature.RESEARCH))):
+    """매입가 = 최근 실구매 1단위가 — 지금까지 구매 기록으로 한 번 적용 (2026-11-27). 바뀐 옵션 · 제외 건수."""
+    from services.order.cost_sync import backfill
+    try:
+        d = await backfill()
+        d["changed"] = [{**c, "old": str(c["old"]) if c["old"] is not None else None, "new": str(c["new"])} for c in d["changed"]]
+        return success(**d)
+    except Exception as e:
+        logger.exception("매입가 백필 실패")
+        raise HTTPException(status_code=500, detail=f"매입가 백필 실패: {type(e).__name__}")
