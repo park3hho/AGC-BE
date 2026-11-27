@@ -38,6 +38,10 @@ async def calc() -> dict:
            order by p.id desc, o.sort, o.id""")
     ids = [r["option_id"] for r in rows]
     meas = await measure_averages(ids)
+    # 최근 실구매로 바뀐 매입가 (cost_sync, 2026-11-27) — 옵션별 마지막 갱신
+    last = {r["option_id"]: r for r in await conn.execute_query_dict(
+        """select distinct on (option_id) option_id, old_cny, new_cny, created_at from option_cost_log
+           where applied order by option_id, id desc""")}
     ctx = await jiyun_estimate.load_context()
     items = []
     for r in rows:
@@ -62,6 +66,9 @@ async def calc() -> dict:
             "option": " / ".join(x for x in (r["option1"], r["option2"]) if x),
             "cost_cny": f"{cny:.2f}", "cost_krw": int(cost), "price": price, "pay_fee": int(fee),
             "profit": int(price - fee - cost), **{"size": size},
+            "last_buy": ({"old_cny": f"{last[r['option_id']]['old_cny']:.2f}" if last[r['option_id']]['old_cny'] is not None else None,
+                          "new_cny": f"{last[r['option_id']]['new_cny']:.2f}",
+                          "at": last[r['option_id']]['created_at'].isoformat()} if r["option_id"] in last else None),
         })
     return {"fx": f"{fx:.2f}", "rule": {"markup": "1.1", "pay_fee_pct": "3.52", "round_to": ROUND_TO,
                                         "divisor": DIVISOR}, "items": items, "total": len(items)}
