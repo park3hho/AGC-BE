@@ -59,16 +59,22 @@ def billable_kg(weight_g: float) -> float:
     return FIRST_KG + math.ceil(round((kg - FIRST_KG) / STEP_KG, 6)) * STEP_KG
 
 
-def fee_cny(weight_g: float, rate: str = "food") -> float:
+# 안전 기본요금 (2026-11-27 사용자 "33위안부터 시작하는데 안전하게 40위안부터") — 가격 계산·자사몰 배송비는 첫 1kg 을 ¥40 으로.
+# 실제 타오바오 요금표(FIRST_CNY)는 실제 집운 기록 판별(rate_of)·대조(tariff=True)에만 쓴다.
+SAFE_FIRST_CNY = 40.0
+
+
+def fee_cny(weight_g: float, rate: str = "food", tariff: bool = False) -> float:
     b = billable_kg(weight_g)
-    return FIRST_CNY[rate] + (b - FIRST_KG) / STEP_KG * STEP_CNY
+    first = FIRST_CNY[rate] if tariff else max(FIRST_CNY[rate], SAFE_FIRST_CNY)
+    return first + (b - FIRST_KG) / STEP_KG * STEP_CNY
 
 
 def rate_of(weight_kg: float, fee: float) -> Optional[str]:
     """실제 집운 무게·요금이 어느 요금표와 맞는지 (무게 반올림 오차로 한 칸 위도 허용)."""
     g = float(weight_kg) * 1000
     for r in ("food", "general"):
-        if abs(fee_cny(g, r) - fee) < 0.01 or abs(fee_cny(g + 10, r) - fee) < 0.01:
+        if abs(fee_cny(g, r, True) - fee) < 0.01 or abs(fee_cny(g + 10, r, True) - fee) < 0.01:
             return r
     return None
 
@@ -272,6 +278,9 @@ def estimate(ctx: Ctx, items: list[tuple[int, int]]) -> dict:
         "billable_kg": billable_kg(w), "fee_cny": fee, "parts": parts,
         "fee_cny_sum_max": fee_cny(smax, rate),          # 상자마다 큰 값 합 (보수적)
         "fee_cny_food": fee_cny(w, "food"), "fee_cny_general": fee_cny(w, "general"),
+        # 실제 타오바오 요금표 기준(안전 기본요금 ¥40 없이) — 실제 집운 대조용
+        "tariff_cny": (fee_cny(w / parts, rate, True) * parts),
+        "tariff_cny_food": fee_cny(w, "food", True), "tariff_cny_general": fee_cny(w, "general", True),
         "over_limit": w / 1000 > MAX_KG,
         "basis": sorted({l["source"] for l in lines}),
     }

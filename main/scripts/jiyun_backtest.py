@@ -63,16 +63,16 @@ async def main(out_path: str | None):
             exc.append("기록 이상(당시 확인 필요 표시)")
         cold = bool(actual_rate) and e["rate"] != actual_rate
         # 요금표를 알았다면(처음 보내는 제품의 요금표는 미리 모름) 얼마였을지
-        fee_rate_known = (e["fee_cny_general"] if actual_rate == "general" else e["fee_cny_food"]) if cold else e["fee_cny"]
+        fee_rate_known = (e["tariff_cny_general"] if actual_rate == "general" else e["tariff_cny_food"]) if cold else e["tariff_cny"]
         res.append({
             "jiyun": b, "date": t.strftime("%m-%d"), "orders": "+".join(sorted({r["code"] for r in orders})),
             "items": "; ".join(f"{(l['title'] or '')[:18]} {l['label'][:22] if l['label'] else ''} ×{l['units']}" for l in e["items"]),
             "basis": "/".join(e["basis"]), "rate_pred": e["rate"], "rate_actual": actual_rate or "",
             "kg_pred": round(e["weight_g"] / 1000, 2), "kg_actual": act_kg,
-            "fee_pred": e["fee_cny"], "fee_sum_max": e["fee_cny_sum_max"], "fee_actual": act_fee,
-            "diff": round(e["fee_cny"] - act_fee, 2),
-            "fee_old": je.fee_cny(old_g, "food") if old_g else None,
-            "diff_old": round(je.fee_cny(old_g, "food") - act_fee, 2) if old_g else None,
+            "fee_pred": e["tariff_cny"], "fee_safe": e["fee_cny"], "fee_sum_max": e["fee_cny_sum_max"], "fee_actual": act_fee,
+            "diff": round(e["tariff_cny"] - act_fee, 2),
+            "fee_old": je.fee_cny(old_g, "food", True) if old_g else None,
+            "diff_old": round(je.fee_cny(old_g, "food", True) - act_fee, 2) if old_g else None,
             "test": rs[0]["is_test"],
             "exception": " / ".join(exc), "rate_cold_miss": cold,
             "diff_rate_known": round(fee_rate_known - act_fee, 2),
